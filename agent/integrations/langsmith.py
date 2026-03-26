@@ -19,7 +19,14 @@ from deepagents.backends.protocol import (
     WriteResult,
 )
 from deepagents.backends.sandbox import BaseSandbox
-from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
+
+try:
+    from langsmith.sandbox import Sandbox, SandboxClient, SandboxTemplate
+except ImportError as e:
+    raise ImportError(
+        "LangSmith sandbox requires the 'langsmith' package. "
+        "Install it with: uv pip install 'langsmith>=0.7.1'"
+    ) from e
 
 
 def _get_langsmith_api_key() -> str | None:

@@ -357,11 +357,11 @@ async def fetch_pr_branch(
 
 async def extract_pr_context(
     payload: dict[str, Any], event_type: str
-) -> tuple[dict[str, str], int | None, str, str, str, int | None, str | None]:
+) -> tuple[dict[str, str], int | None, str, str, str, int | None, str | None, str]:
     """Extract key fields from a GitHub PR webhook payload.
 
     Returns:
-        (repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id)
+        (repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id, base_branch)
     """
     repo = payload.get("repository", {})
     repo_config = {"owner": repo.get("owner", {}).get("login", ""), "name": repo.get("name", "")}
@@ -370,6 +370,8 @@ async def extract_pr_context(
     pr_number = pr_data.get("number")
     pr_url = pr_data.get("html_url", "") or pr_data.get("url", "")
     branch_name = (payload.get("pull_request") or {}).get("head", {}).get("ref", "")
+    # Get the target/base branch the PR is merging into
+    base_branch = (payload.get("pull_request") or {}).get("base", {}).get("ref", "")
 
     if not branch_name and pr_number:
         branch_name = await fetch_pr_branch(repo_config, pr_number)
@@ -380,7 +382,16 @@ async def extract_pr_context(
     comment_id = comment.get("id")
     node_id = comment.get("node_id") if event_type == "pull_request_review" else None
 
-    return repo_config, pr_number, branch_name, github_login, pr_url, comment_id, node_id
+    return (
+        repo_config,
+        pr_number,
+        branch_name,
+        github_login,
+        pr_url,
+        comment_id,
+        node_id,
+        base_branch,
+    )
 
 
 def build_pr_prompt(comments: list[dict[str, Any]], pr_url: str) -> str:

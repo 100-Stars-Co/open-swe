@@ -8,7 +8,7 @@ from typing import Any
 
 import httpx
 
-from agent.utils.langsmith import get_langsmith_trace_url
+from agent.utils.tracing import get_trace_url
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +65,7 @@ async def comment_on_linear_issue(
 
 async def post_linear_trace_comment(issue_id: str, run_id: str, triggering_comment_id: str) -> None:
     """Post a trace URL comment on a Linear issue."""
-    trace_url = get_langsmith_trace_url(run_id)
+    trace_url = get_trace_url(run_id)
     if trace_url:
         await comment_on_linear_issue(
             issue_id,

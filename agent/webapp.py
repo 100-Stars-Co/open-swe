@@ -15,9 +15,7 @@ from langgraph_sdk import get_client
 from langgraph_sdk.client import LangGraphClient
 
 from .utils.auth import (
-    is_bot_token_only_mode,
     persist_encrypted_github_token,
-    resolve_github_token_from_email,
 )
 from .utils.comments import get_recent_comments
 from .utils.github_app import get_github_app_installation_token
@@ -33,7 +31,6 @@ from .utils.github_comments import (
     sanitize_github_comment_body,
     verify_github_signature,
 )
-from .utils.github_token import get_github_token_from_thread
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
@@ -71,7 +68,7 @@ LANGGRAPH_URL = os.environ.get("LANGGRAPH_URL") or os.environ.get(
 )
 
 _AGENT_VERSION_METADATA: dict[str, str] = (
-    {"LANGSMITH_AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
+    {"AGENT_VERSION": os.environ["LANGCHAIN_REVISION_ID"]}
     if os.environ.get("LANGCHAIN_REVISION_ID")
     else {}
 )
@@ -1170,6 +1167,7 @@ async def _trigger_or_queue_run(
     github_login: str,
     repo_config: dict[str, str],
     pr_number: int,
+    base_branch: str = "",
 ) -> None:
     """Create a new agent run or queue the message if the thread is busy."""
     thread_active = await is_thread_active(thread_id)
@@ -1190,6 +1188,7 @@ async def _trigger_or_queue_run(
                 "github_login": github_login,
                 "repo": repo_config,
                 "pr_number": pr_number,
+                "base_branch": base_branch,
             },
             "metadata": _AGENT_VERSION_METADATA,
         },
@@ -1204,31 +1203,16 @@ async def _get_or_resolve_thread_github_token(thread_id: str, email: str) -> str
     In bot-token-only mode, returns a fresh GitHub App installation token
     instead of resolving per-user OAuth tokens.
     """
-    if is_bot_token_only_mode():
-        bot_token = await get_github_app_installation_token()
-        if bot_token:
-            try:
-                await persist_encrypted_github_token(thread_id, bot_token)
-            except Exception:
-                logger.warning("Could not persist bot token for thread %s", thread_id)
-            return bot_token
-        logger.warning("Bot-token-only mode but GitHub App token unavailable")
-        return None
-
-    github_token, _encrypted_token = await get_github_token_from_thread(thread_id)
-    if github_token:
-        return github_token
-
-    auth_result = await resolve_github_token_from_email(email)
-    github_token = auth_result.get("token")
-    if not github_token:
-        return None
-
-    try:
-        await persist_encrypted_github_token(thread_id, github_token)
-    except Exception:
-        logger.warning("Could not persist GitHub token for thread %s", thread_id)
-    return github_token
+    # Always use GitHub App installation token (per-user OAuth via LangSmith removed)
+    bot_token = await get_github_app_installation_token()
+    if bot_token:
+        try:
+            await persist_encrypted_github_token(thread_id, bot_token)
+        except Exception:
+            logger.warning("Could not persist bot token for thread %s", thread_id)
+        return bot_token
+    logger.warning("Bot-token-only mode but GitHub App token unavailable")
+    return None
 
 
 async def process_github_pr_comment(payload: dict[str, Any], event_type: str) -> None:
@@ -1250,6 +1234,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         pr_url,
         comment_id,
         node_id,
+        base_branch,
     ) = await extract_pr_context(payload, event_type)
 
     logger.info(
@@ -1273,17 +1258,30 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
         logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
         langgraph_client = get_client(url=LANGGRAPH_URL)
+        thread_metadata = {"branch_name": branch_name}
+        if base_branch:
+            thread_metadata["base_branch"] = base_branch
         try:
-            await langgraph_client.threads.update(thread_id, metadata={"branch_name": branch_name})
+            await langgraph_client.threads.update(thread_id, metadata=thread_metadata)
         except Exception as exc:  # noqa: BLE001
             if _is_not_found_error(exc):
                 await langgraph_client.threads.create(
                     thread_id=thread_id,
                     if_exists="do_nothing",
-                    metadata={"branch_name": branch_name},
+                    metadata=thread_metadata,
                 )
             else:
                 logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
+    else:
+        # Thread already exists - update metadata with base_branch if available
+        if base_branch:
+            langgraph_client = get_client(url=LANGGRAPH_URL)
+            try:
+                await langgraph_client.threads.update(
+                    thread_id, metadata={"base_branch": base_branch}
+                )
+            except Exception:
+                logger.warning("Failed to update base_branch metadata for thread %s", thread_id)
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
@@ -1321,6 +1319,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         github_login=github_login,
         repo_config=repo_config,
         pr_number=pr_number,
+        base_branch=base_branch,
     )
 
 

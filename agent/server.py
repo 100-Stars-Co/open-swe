@@ -1,6 +1,11 @@
 """Main entry point and CLI loop for Open SWE agent."""
 # ruff: noqa: E402
 
+# Load environment variables from .env file before other imports
+from dotenv import load_dotenv
+
+load_dotenv()
+
 # Suppress deprecation warnings from langchain_core (e.g., Pydantic V1 on Python 3.14+)
 # ruff: noqa: E402
 import logging
@@ -25,8 +30,8 @@ warnings.filterwarnings("ignore", message=".*Pydantic V1.*", category=UserWarnin
 # Now safe to import agent (which imports LangChain modules)
 from deepagents import create_deep_agent
 from deepagents.backends.protocol import SandboxBackendProtocol
-from langsmith.sandbox import SandboxClientError
 
+from .integrations.langfuse_tracing import get_langfuse_callback_handler
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
@@ -286,7 +291,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
                     sandbox_backend, repo_owner, repo_name, github_token
                 )
-            except SandboxClientError:
+            except RuntimeError:
                 logger.warning(
                     "Cached sandbox is no longer reachable for thread %s, recreating sandbox",
                     thread_id,
@@ -358,7 +363,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 repo_dir = await _clone_or_pull_repo_in_sandbox(
                     sandbox_backend, repo_owner, repo_name, github_token
                 )
-            except SandboxClientError:
+            except RuntimeError:
                 logger.warning(
                     "Existing sandbox is no longer reachable for thread %s, recreating sandbox",
                     thread_id,
@@ -402,7 +407,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     logger.info("Returning agent with sandbox for thread %s", thread_id)
 
     model_id = os.getenv("DEEPAGENTS_MODEL", "anthropic:claude-opus-4-6")
-    return create_deep_agent(
+    agent = create_deep_agent(
         model=make_model(model_id, temperature=0, max_tokens=20_000),
         system_prompt=construct_system_prompt(
             repo_dir,
@@ -439,4 +444,17 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             ensure_no_empty_msg,
             open_pr_if_needed,
         ],
-    ).with_config(config)
+    )
+
+    # Add Langfuse callback handler for tracing if configured
+    langfuse_handler = get_langfuse_callback_handler()
+    if langfuse_handler:
+        # Merge callbacks into config if they exist, otherwise create new
+        merged_config = dict(config)
+        if merged_config.get("callbacks"):
+            merged_config["callbacks"] = list(merged_config["callbacks"]) + [langfuse_handler]
+        else:
+            merged_config["callbacks"] = [langfuse_handler]
+        return agent.with_config(merged_config)
+
+    return agent.with_config(config)

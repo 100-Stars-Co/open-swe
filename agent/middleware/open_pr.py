@@ -148,7 +148,10 @@ async def open_pr_if_needed(
                 git_push, sandbox_backend, repo_dir, target_branch, github_token
             )
 
-            base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
+            # Get base branch from metadata (PR webhook context) or configurable, fallback to default
+            base_branch = metadata.get("base_branch") or configurable.get("base_branch", "")
+            if not base_branch:
+                base_branch = await get_github_default_branch(repo_owner, repo_name, github_token)
             logger.info("Using base branch: %s", base_branch)
 
             await create_github_pr(
