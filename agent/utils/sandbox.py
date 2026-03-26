@@ -34,9 +34,7 @@ def create_sandbox(sandbox_id: str | None = None, timeout: int | None = None):
     factory = SANDBOX_FACTORIES.get(sandbox_type)
     if not factory:
         supported = ", ".join(sorted(SANDBOX_FACTORIES))
-        raise ValueError(
-            f"Invalid sandbox type: {sandbox_type}. Supported types: {supported}"
-        )
+        raise ValueError(f"Invalid sandbox type: {sandbox_type}. Supported types: {supported}")
 
     # Pass timeout only if the factory supports it
     # For now, only E2B is updated to support it explicitly in its signature

@@ -136,6 +136,10 @@ model=make_model("openai:gpt-4o", temperature=0, max_tokens=16_000)
 
 # Google
 model=make_model("google_genai:gemini-2.5-pro", temperature=0, max_tokens=16_000)
+
+# Ollama (local models)
+model=make_model("ollama:llama3.3", temperature=0, max_tokens=16_000)
+model=make_model("ollama:codellama", temperature=0, max_tokens=16_000)
 ```
 
 The `make_model()` helper in `agent/utils/model.py` wraps `langchain.chat_models.init_chat_model`. For OpenAI models, it automatically enables the Responses API. For full control, pass a pre-configured model instance directly:
@@ -382,9 +386,11 @@ The system prompt is assembled in `agent/prompt.py` from modular sections. You c
 | `CODE_REVIEW_GUIDELINES_SECTION` | How the agent reviews code changes |
 | `COMMUNICATION_SECTION` | Formatting and messaging guidelines |
 
-### Using AGENTS.md
+### Using CLAUDE.md or AGENTS.md
 
-Drop an `AGENTS.md` file in the root of any repository to add repo-specific instructions. The agent reads it from the sandbox at startup and appends it to the system prompt. This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
+Drop a `CLAUDE.md` file (or `AGENTS.md`) in the root of any repository to add repo-specific instructions. The agent reads it from the sandbox at startup and appends it to the system prompt. This is the easiest way to encode conventions per-repo without modifying Open SWE's code.
+
+If both files exist, `CLAUDE.md` takes precedence.
 
 ---
 

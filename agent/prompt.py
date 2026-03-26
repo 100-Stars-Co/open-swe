@@ -26,7 +26,7 @@ You are currently executing a software engineering task. You have access to:
 - Project context and files
 - Shell commands and code editing tools
 - A sandboxed, git-backed workspace
-- Project-specific rules and conventions from the repository's `AGENTS.md` file (if present)"""
+- Project-specific rules and conventions from the repository's `CLAUDE.md` or `AGENTS.md` file (if present)"""
 
 
 FILE_MANAGEMENT_SECTION = """---
@@ -282,11 +282,13 @@ def construct_system_prompt(
     linear_project_id: str = "",
     linear_issue_number: str = "",
     agents_md: str = "",
+    agents_md_filename: str = "",
 ) -> str:
     agents_md_section = ""
     if agents_md:
+        filename = agents_md_filename or "CLAUDE.md"
         agents_md_section = (
-            "\nThe following text is pulled from the repository's AGENTS.md file. "
+            f"\nThe following text is pulled from the repository's {filename} file. "
             "It may contain specific instructions and guidelines for the agent.\n"
             "<agents_md>\n"
             f"{agents_md}\n"

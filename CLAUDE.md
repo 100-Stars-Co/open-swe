@@ -60,7 +60,7 @@ agent/
 Webhook (Slack/Linear/GitHub)
   → webapp.py verifies signature, extracts context
   → create/reconnect sandbox (thread-persistent)
-  → clone/pull repo, read AGENTS.md from repo root
+  → clone/pull repo, read CLAUDE.md (or AGENTS.md) from repo root
   → get_agent() → DeepAgent loop (tools + middleware)
   → commit_and_open_pr tool
   → post result back to trigger channel
@@ -83,7 +83,7 @@ Webhook (Slack/Linear/GitHub)
 
 4. **Context Engineering** — system prompt assembled from:
    - Structured sections in `prompt.py` (working env, task execution, coding standards, etc.)
-   - Optional `AGENTS.md` file from target repo (injected automatically)
+   - Optional `CLAUDE.md` or `AGENTS.md` file from target repo (injected automatically, CLAUDE.md takes precedence)
 
 ### Adding Components
 
@@ -107,7 +107,7 @@ Webhook (Slack/Linear/GitHub)
 | -------------------- | ------------------------------------------------------------------------------------- |
 | **Agent framework**  | LangGraph >= 1.0.8, DeepAgents >= 0.4.3                                                 |
 | **HTTP server**      | FastAPI + Uvicorn                                                                     |
-| **LLM**              | Anthropic Claude (primary), OpenAI/OpenRouter (configurable via `DEEPAGENTS_MODEL`)  |
+| **LLM**              | Anthropic Claude (primary), OpenAI/OpenRouter/Ollama (configurable via `DEEPAGENTS_MODEL`)  |
 | **HTTP client**      | `httpx`                                                                               |
 | **Linter/formatter** | Ruff (100-char lines, isort, Black-like)                                              |
 | **Test runner**      | Pytest with `asyncio_mode = "auto"`                                                   |
@@ -122,7 +122,7 @@ Webhook (Slack/Linear/GitHub)
 - **Tools:** Each tool is a single file in `agent/tools/`. Use the `@tool` decorator from LangChain.
 - **Tests:** Place in `tests/test_<module>.py`. `pytest.mark.asyncio` unnecessary — `asyncio_mode = "auto"` handles it.
 - **No sandbox calls in unit tests** — mock the sandbox client; tests run without a live sandbox.
-- **Target repo conventions** — if the target repo has an `AGENTS.md`, that file is automatically injected into the system prompt. Org-specific rules go there.
+- **Target repo conventions** — if the target repo has a `CLAUDE.md` or `AGENTS.md`, that file is automatically injected into the system prompt. Org-specific rules go there. `CLAUDE.md` takes precedence if both exist.
 
 ## Environment Variables
 
@@ -131,7 +131,8 @@ Configuration is loaded from `.env`. Key variables:
 ```
 # LLM
 ANTHROPIC_API_KEY
-DEEPAGENTS_MODEL              # e.g. "anthropic:claude-opus-4-6"
+DEEPAGENTS_MODEL              # e.g. "anthropic:claude-opus-4-6", "ollama:llama3.3"
+OLLAMA_BASE_URL               # Optional: custom Ollama server URL (default: http://localhost:11434)
 
 # GitHub App (required)
 GITHUB_APP_ID
