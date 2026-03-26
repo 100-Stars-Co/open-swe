@@ -12,6 +12,7 @@ import logging
 import os
 import shlex
 import warnings
+from pathlib import Path
 
 logger = logging.getLogger(__name__)
 
@@ -404,6 +405,22 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue_number = linear_issue.get("linear_issue_number", "")
     agents_md, agents_md_filename = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
+    # Load available skills (wrapped in thread to avoid blocking)
+    skills_dir = Path(__file__).parent / "skills"
+    skills_md = ""
+    if await asyncio.to_thread(skills_dir.exists):
+        skill_files = await asyncio.to_thread(lambda: list(skills_dir.glob("*.md")))
+        if skill_files:
+            skills_content = []
+            for skill_file in sorted(skill_files):
+                try:
+                    content = await asyncio.to_thread(skill_file.read_text)
+                    skills_content.append(content)
+                except Exception:
+                    logger.warning("Failed to read skill file: %s", skill_file)
+            if skills_content:
+                skills_md = "\n\n".join(skills_content)
+
     logger.info("Returning agent with sandbox for thread %s", thread_id)
 
     model_id = os.getenv("DEEPAGENTS_MODEL", "anthropic:claude-opus-4-6")
@@ -415,6 +432,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_issue_number=linear_issue_number,
             agents_md=agents_md,
             agents_md_filename=agents_md_filename,
+            skills_md=skills_md,
         ),
         tools=[
             http_request,
