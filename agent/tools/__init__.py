@@ -1,5 +1,11 @@
 from .commit_and_open_pr import commit_and_open_pr
 from .fetch_url import fetch_url
+from .figma_mcp import (
+    close_figma_client,
+    figma_export_image,
+    figma_get_component,
+    figma_get_file,
+)
 from .github_comment import github_comment
 from .github_review import (
     create_pr_review,
@@ -21,10 +27,14 @@ from .linear_update_issue import linear_update_issue
 from .slack_thread_reply import slack_thread_reply
 
 __all__ = [
+    "close_figma_client",
     "commit_and_open_pr",
     "create_pr_review",
     "dismiss_pr_review",
     "fetch_url",
+    "figma_export_image",
+    "figma_get_component",
+    "figma_get_file",
     "get_pr_review",
     "github_comment",
     "http_request",
