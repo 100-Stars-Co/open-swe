@@ -47,9 +47,10 @@ function uuidv5(name: string): string {
     .update(Buffer.concat([UUID_NAMESPACE_URL, Buffer.from(name, "utf-8")]))
     .digest();
   // Set version bits (version 5)
-  hash[6] = ((hash[6] as number) & 0x0f) | 0x50;
-  // Set variant bits
-  hash[8] = ((hash[8] as number) & 0x3f) | 0x80;
+  const byte6 = hash.readUInt8(6);
+  const byte8 = hash.readUInt8(8);
+  hash.writeUInt8((byte6 & 0x0f) | 0x50, 6);
+  hash.writeUInt8((byte8 & 0x3f) | 0x80, 8);
   const hex = hash.toString("hex");
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20, 32)}`;
 }
@@ -163,8 +164,12 @@ async function processGithubPrComment(
     (payload["issue"] as Record<string, unknown> | undefined) ?? {};
   const prNumber = (prData["number"] as number | undefined) ?? null;
   const prUrl = (prData["html_url"] as string | undefined) ?? (prData["url"] as string | undefined) ?? "";
-  let branchName = ((payload["pull_request"] as Record<string, unknown> | undefined)?.["head"] as Record<string, unknown> | undefined)?.["ref"] as string | undefined ?? "";
-  const baseBranch = ((payload["pull_request"] as Record<string, unknown> | undefined)?.["base"] as Record<string, unknown> | undefined)?.["ref"] as string | undefined ?? "";
+
+  const prPayload = payload["pull_request"] as Record<string, unknown> | undefined;
+  const prHead = prPayload?.["head"] as Record<string, unknown> | undefined;
+  const prBase = prPayload?.["base"] as Record<string, unknown> | undefined;
+  let branchName = (prHead?.["ref"] as string | undefined) ?? "";
+  const baseBranch = (prBase?.["ref"] as string | undefined) ?? "";
 
   if (!branchName && prNumber) {
     branchName = await fetchPrBranch(repoConfig, prNumber);

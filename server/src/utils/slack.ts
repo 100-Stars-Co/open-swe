@@ -240,15 +240,14 @@ export async function getSlackUserNames(userIds: string[]): Promise<Record<strin
 
   const infos = await Promise.allSettled(uniqueIds.map((id) => getSlackUserInfo(id)));
   const result: Record<string, string> = {};
-  for (let i = 0; i < uniqueIds.length; i++) {
-    const userId = uniqueIds[i] as string;
+  uniqueIds.forEach((userId, i) => {
     const info = infos[i];
     if (info?.status === "fulfilled" && info.value) {
       result[userId] = extractSlackUserName(info.value);
     } else {
       result[userId] = userId;
     }
-  }
+  });
   return result;
 }
 

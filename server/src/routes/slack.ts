@@ -98,13 +98,13 @@ async function processSlackMention(
     const slackUser = await getSlackUserInfo(userId);
     if (slackUser) {
       const profile = slackUser["profile"] as Record<string, string> | undefined;
-      if (profile) {
-        userEmail = profile["email"];
-        userName =
-          profile["display_name"] || profile["real_name"] ||
-          (slackUser["real_name"] as string | undefined) ||
-          (slackUser["name"] as string | undefined) || "";
-      }
+      userEmail = profile?.["email"];
+      userName =
+        profile?.["display_name"] ||
+        profile?.["real_name"] ||
+        (slackUser["real_name"] as string | undefined) ||
+        (slackUser["name"] as string | undefined) ||
+        "";
     }
   }
 

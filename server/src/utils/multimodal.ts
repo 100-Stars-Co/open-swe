@@ -60,7 +60,7 @@ export async function fetchImageBlock(imageUrl: string): Promise<ImageBlock | nu
     const response = await fetch(imageUrl, { headers, redirect: "follow" });
     if (!response.ok) return null;
 
-    let contentType = (response.headers.get("Content-Type") ?? "").split(";")[0]?.trim() ?? "";
+    let contentType = (response.headers.get("Content-Type") || "").split(";")[0].trim();
 
     if (!contentType) {
       // Try to guess from URL extension
