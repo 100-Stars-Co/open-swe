@@ -8,6 +8,9 @@
 .yarn/install-state.gz
 .yarn/cache
 
+# Bun lockfile (commit bun.lockb if you want reproducible installs)
+# bun.lockb
+
 # testing
 /coverage
 
@@ -61,4 +64,6 @@ __pycache__/
 *.egg-info/
 .eggs/
 
-# 
+server/node_modules
+server/bun.lockb
+server/package-lock.json

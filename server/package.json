@@ -1,0 +1,20 @@
+{
+  "name": "open-swe-server",
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "start": "bun --env-file=../.env src/index.ts",
+    "dev": "bun --watch --env-file=../.env src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@langchain/langgraph-sdk": "^1.8.1",
+    "hono": "^4.12.9",
+    "jose": "^6.2.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1",
+    "typescript": "^5.6"
+  }
+}

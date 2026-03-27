@@ -1,4 +1,4 @@
-.PHONY: all format format-check lint test tests integration_tests help run dev
+.PHONY: all format format-check lint test tests integration_tests help run dev server-install server-run server-dev server-typecheck
 
 # Default target executed when no arguments are given to make.
 all: help
@@ -10,11 +10,26 @@ all: help
 dev:
 	langgraph dev
 
-run:
-	uvicorn agent.webapp:app --reload --port 8000
+run: server-run
 
 install:
 	uv pip install -e .
+
+######################
+# SERVER (Hono + Bun)
+######################
+
+server-install:
+	cd server && bun install
+
+server-run:
+	cd server && bun run start
+
+server-dev:
+	cd server && bun run dev
+
+server-typecheck:
+	cd server && bun run typecheck
 
 ######################
 # TESTING
@@ -59,9 +74,13 @@ format-check:
 
 help:
 	@echo '----'
-	@echo 'dev                          - run LangGraph dev server'
-	@echo 'run                          - run webhook server'
-	@echo 'install                      - install dependencies'
+	@echo 'dev                          - run LangGraph dev server (Python agent)'
+	@echo 'run                          - run Hono webhook server (Bun)'
+	@echo 'install                      - install Python dependencies'
+	@echo 'server-install               - install server npm dependencies (bun install)'
+	@echo 'server-run                   - run Hono webhook server'
+	@echo 'server-dev                   - run Hono webhook server with hot reload'
+	@echo 'server-typecheck             - typecheck the TypeScript server'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'
 	@echo 'test                         - run unit tests'
