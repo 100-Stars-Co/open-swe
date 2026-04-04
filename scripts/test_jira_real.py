@@ -10,7 +10,6 @@ Usage:
     python scripts/test_jira_real.py
 """
 
-import asyncio
 import os
 import sys
 

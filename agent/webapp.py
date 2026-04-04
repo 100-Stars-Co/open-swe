@@ -32,6 +32,19 @@ from .utils.github_comments import (
     verify_github_signature,
 )
 from .utils.github_user_email_map import GITHUB_USER_EMAIL_MAP
+from .utils.jira import add_comment as jira_add_comment
+from .utils.jira import get_issue as jira_get_issue
+from .utils.jira_webhook import (
+    contains_bot_mention as jira_contains_bot_mention,
+)
+from .utils.jira_webhook import (
+    extract_repo_from_text as jira_extract_repo_from_text,
+)
+from .utils.jira_webhook import (
+    generate_thread_id_from_jira_issue,
+    parse_jira_webhook_payload,
+    verify_jira_webhook_secret,
+)
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
@@ -48,6 +61,7 @@ from .utils.slack import (
     strip_bot_mention,
     verify_slack_signature,
 )
+from .utils.tracing import get_trace_url
 
 logger = logging.getLogger(__name__)
 
@@ -56,6 +70,7 @@ app = FastAPI()
 LINEAR_WEBHOOK_SECRET = os.environ.get("LINEAR_WEBHOOK_SECRET", "")
 GITHUB_WEBHOOK_SECRET = os.environ.get("GITHUB_WEBHOOK_SECRET", "")
 SLACK_SIGNING_SECRET = os.environ.get("SLACK_SIGNING_SECRET", "")
+JIRA_WEBHOOK_SECRET = os.environ.get("JIRA_WEBHOOK_SECRET", "")
 SLACK_BOT_USER_ID = os.environ.get("SLACK_BOT_USER_ID", "")
 SLACK_BOT_USERNAME = os.environ.get("SLACK_BOT_USERNAME", "")
 DEFAULT_REPO_OWNER = os.environ.get("DEFAULT_REPO_OWNER", "langchain-ai")
@@ -303,9 +318,7 @@ async def _upsert_slack_thread_repo_metadata(
 ) -> None:
     """Persist the selected repo config on the thread metadata."""
     try:
-        await langgraph_client.threads.update(
-            thread_id=thread_id, metadata={"repo": repo_config}
-        )
+        await langgraph_client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             try:
@@ -336,9 +349,7 @@ async def check_if_using_repo_msg_sent(
     return False
 
 
-async def get_slack_repo_config(
-    message: str, channel_id: str, thread_ts: str
-) -> dict[str, str]:
+async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
@@ -669,9 +680,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
             langgraph_client = get_client(url=LANGGRAPH_URL)
             runs = await langgraph_client.runs.list(thread_id, limit=1)
             if runs:
-                await post_linear_trace_comment(
-                    issue_id, runs[0]["run_id"], triggering_comment_id
-                )
+                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
@@ -688,9 +697,7 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
-async def process_slack_mention(
-    event_data: dict[str, Any], repo_config: dict[str, str]
-) -> None:
+async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
     """Process a Slack app mention by creating or interrupting a thread run."""
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
@@ -780,11 +787,7 @@ async def process_slack_mention(
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
     image_urls = dedupe_urls(
-        [
-            url
-            for msg in context_messages
-            for url in extract_image_urls(msg.get("text", ""))
-        ]
+        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
         + [
             f["url_private"]
             for msg in context_messages
@@ -859,9 +862,7 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
         True if signature is valid, False otherwise
     """
     if not secret:
-        logger.warning(
-            "LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request"
-        )
+        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
         return False
 
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
@@ -1003,9 +1004,7 @@ async def linear_webhook_verify() -> dict[str, str]:
 
 
 @app.post("/webhooks/slack")
-async def slack_webhook(
-    request: Request, background_tasks: BackgroundTasks
-) -> dict[str, str]:
+async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
 
@@ -1121,9 +1120,7 @@ def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for comment in comments:
         body = comment.get("body", "")
-        if not body or any(
-            body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES
-        ):
+        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
             continue
         author = comment.get("author", "unknown")
         formatted_body = format_github_comment_body_for_prompt(author, body)
@@ -1149,9 +1146,7 @@ def build_github_issue_prompt(
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
     comments_text = _build_github_issue_comments_text(comments)
     sanitized_title = sanitize_github_comment_body(title)
-    formatted_body = format_github_comment_body_for_prompt(
-        issue_author or github_login, body
-    )
+    formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
     return (
         "Please work on the following GitHub issue:\n\n"
         f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
@@ -1167,7 +1162,9 @@ def build_github_issue_prompt(
 
 def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> str:
     """Build the prompt for a follow-up GitHub issue comment."""
-    return f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
+    return (
+        f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
+    )
 
 
 def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
@@ -1197,9 +1194,7 @@ async def _trigger_or_queue_run(
         await queue_message_for_thread(thread_id, prompt)
         return
 
-    logger.info(
-        "Creating LangGraph run for thread %s from GitHub PR comment", thread_id
-    )
+    logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await langgraph_client.runs.create(
         thread_id,
@@ -1298,9 +1293,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                     metadata=thread_metadata,
                 )
             else:
-                logger.warning(
-                    "Failed to persist branch_name metadata for thread %s", thread_id
-                )
+                logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
     else:
         # Thread already exists - update metadata with base_branch if available
         if base_branch:
@@ -1310,9 +1303,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                     thread_id, metadata={"base_branch": base_branch}
                 )
             except Exception:
-                logger.warning(
-                    "Failed to update base_branch metadata for thread %s", thread_id
-                )
+                logger.warning("Failed to update base_branch metadata for thread %s", thread_id)
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
@@ -1338,9 +1329,7 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.warning("No PR number found in payload, skipping")
         return
 
-    comments = await fetch_pr_comments_since_last_tag(
-        repo_config, pr_number, token=github_token
-    )
+    comments = await fetch_pr_comments_since_last_tag(repo_config, pr_number, token=github_token)
     if not comments:
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
@@ -1399,9 +1388,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     comment_id = comment.get("id")
     if event_type == "issue_comment" and comment_id:
         if not reaction_token:
-            logger.warning(
-                "No GitHub token available to react to issue comment %s", comment_id
-            )
+            logger.warning("No GitHub token available to react to issue comment %s", comment_id)
         else:
             reacted = await react_to_github_comment(
                 repo_config,
@@ -1424,9 +1411,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         comments = await fetch_issue_comments(
             repo_config, issue_number, token=github_token or app_token
         )
-        if comment_id and not any(
-            item.get("comment_id") == comment_id for item in comments
-        ):
+        if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
             comments.append(
                 {
                     "body": comment.get("body", ""),
@@ -1478,9 +1463,7 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
 
 @app.post("/webhooks/github")
-async def github_webhook(
-    request: Request, background_tasks: BackgroundTasks
-) -> dict[str, str]:
+async def github_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
     """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
     body = await request.body()
 
@@ -1514,12 +1497,8 @@ async def github_webhook(
         return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
     issue = payload.get("issue", {})
-    is_pull_request_comment = bool(
-        event_type == "issue_comment" and issue.get("pull_request")
-    )
-    is_issue_comment = bool(
-        event_type == "issue_comment" and not issue.get("pull_request")
-    )
+    is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
+    is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
     is_issue_event = event_type == "issues"
 
     if is_issue_event:
@@ -1560,9 +1539,7 @@ async def github_webhook(
             "reason": "Comment does not mention @openswe or @open-swe",
         }
 
-    logger.info(
-        "Accepted GitHub webhook: event=%s, scheduling background task", event_type
-    )
+    logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
     if is_pull_request_comment or event_type in {
         "pull_request_review_comment",
         "pull_request_review",
@@ -1582,3 +1559,275 @@ async def github_webhook(
         "status": "ignored",
         "reason": f"Unsupported payload for event type: {event_type}",
     }
+
+
+async def process_jira_issue(  # noqa: PLR0912, PLR0915
+    issue_data: dict[str, Any], repo_config: dict[str, str]
+) -> None:
+    """Process a Jira issue by creating a new LangGraph thread and run.
+
+    Args:
+        issue_data: The Jira issue data from webhook.
+        repo_config: The repo configuration with owner and name.
+    """
+    issue_key = issue_data.get("issue_key", "")
+    logger.info(
+        "Processing Jira issue %s for repo %s/%s",
+        issue_key,
+        repo_config.get("owner"),
+        repo_config.get("name"),
+    )
+
+    thread_id = generate_thread_id_from_jira_issue(issue_key)
+
+    # Fetch full issue details from Jira API
+    full_issue_result = await jira_get_issue(issue_key)
+    full_issue = full_issue_result.get("issue", {}) if isinstance(full_issue_result, dict) else {}
+
+    user_email = issue_data.get("comment_author_email", "")
+    user_name = issue_data.get("comment_author", "")
+
+    # Fallback to issue reporter if no comment author
+    if not user_email and full_issue:
+        reporter = full_issue.get("fields", {}).get("reporter", {})
+        user_email = reporter.get("emailAddress", "")
+        user_name = reporter.get("displayName", "")
+
+    logger.info("User email for issue %s: %s", issue_key, user_email)
+
+    # Get issue details
+    fields = full_issue.get("fields", {}) if full_issue else {}
+    title = issue_data.get("issue_summary") or fields.get("summary", "No title")
+    description = issue_data.get("issue_description") or fields.get("description", "")
+    if isinstance(description, dict):
+        # Handle Atlassian Document Format (ADF)
+        description = _extract_text_from_adf(description)
+    description = description or "No description"
+
+    image_urls: list[str] = []
+    description_image_urls = extract_image_urls(description)
+    if description_image_urls:
+        image_urls.extend(description_image_urls)
+        logger.debug(
+            "Found %d image URL(s) in issue description",
+            len(description_image_urls),
+        )
+
+    # Build comments section
+    comments_text = ""
+    triggering_comment = issue_data.get("comment_body", "")
+
+    bot_message_prefixes = (
+        "🔐 **GitHub Authentication Required**",
+        "✅ **Pull Request Created**",
+        "✅ **Pull Request Updated**",
+        "**Pull Request Created**",
+        "**Pull Request Updated**",
+        "🤖 **Agent Response**",
+        "❌ **Agent Error**",
+    )
+
+    # Include triggering comment if present
+    if triggering_comment:
+        comments_text = "\n\n## Comments:\n"
+        trigger_author = user_name or "Unknown"
+        trigger_image_urls = extract_image_urls(triggering_comment)
+        if trigger_image_urls:
+            image_urls.extend(trigger_image_urls)
+            logger.debug(
+                "Found %d image URL(s) in triggering comment by %s",
+                len(trigger_image_urls),
+                trigger_author,
+            )
+        if not any(triggering_comment.startswith(prefix) for prefix in bot_message_prefixes):
+            comments_text += f"\n**{trigger_author}:** {triggering_comment}\n"
+
+    issue_url = issue_data.get("issue_url") or (
+        f"{full_issue.get('self', '').split('/rest')[0]}/browse/{issue_key}" if full_issue else ""
+    )
+
+    triggered_by_line = f"## Triggered by: {user_name}\n\n" if user_name else ""
+    tag_instruction = (
+        f"When calling jira_add_comment, tag {user_name} if you are asking them a question, need their input, or are notifying them of something important (e.g. a completed PR). For simple answers, tagging is not required."
+        if user_name
+        else ""
+    )
+    prompt = (
+        f"Please work on the following issue:\n\n"
+        f"## Title: {title}\n\n"
+        f"{triggered_by_line}"
+        f"## Jira Issue: {issue_key}\n\n"
+        f"## Description:\n{description}\n"
+        f"{comments_text}\n\n"
+        f"Please analyze this issue and implement the necessary changes. "
+        f"When you're done, commit and push your changes. {tag_instruction}"
+    )
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+    if image_urls:
+        image_urls = dedupe_urls(image_urls)
+        logger.info("Preparing %d image(s) for multimodal content", len(image_urls))
+        logger.debug("Image URLs: %s", image_urls)
+
+        async with httpx.AsyncClient() as client:
+            for image_url in image_urls:
+                image_block = await fetch_image_block(image_url, client)
+                if image_block:
+                    content_blocks.append(image_block)
+        logger.info("Built %d content block(s) for prompt", len(content_blocks))
+
+    project_key = issue_data.get("project_key", "")
+    if not project_key and issue_key:
+        # Extract project key from issue key (e.g., "PROJ-123" -> "PROJ")
+        project_key = issue_key.split("-")[0] if "-" in issue_key else ""
+
+    configurable: dict[str, Any] = {
+        "repo": repo_config,
+        "jira_issue": {
+            "key": issue_key,
+            "title": title,
+            "url": issue_url,
+            "project_key": project_key,
+            "triggering_user_name": user_name or "",
+        },
+        "user_email": user_email,
+        "source": "jira",
+    }
+
+    logger.info("Checking if thread %s is active before creating run", thread_id)
+    thread_active = await is_thread_active(thread_id)
+    logger.info("Thread %s active status: %s", thread_id, thread_active)
+
+    if thread_active:
+        logger.info(
+            "Thread %s is active (busy), will queue message instead of creating run",
+            thread_id,
+        )
+
+        queued_payload = {"text": prompt, "image_urls": image_urls}
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content=queued_payload,
+        )
+
+        if queued:
+            logger.info(
+                "Message queued for thread %s, will be processed by middleware",
+                thread_id,
+            )
+        else:
+            logger.error("Failed to queue message for thread %s", thread_id)
+    else:
+        logger.info("Creating LangGraph run for thread %s", thread_id)
+        langgraph_client = get_client(url=LANGGRAPH_URL)
+        run = await langgraph_client.runs.create(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": content_blocks}]},
+            config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+            if_not_exists="create",
+        )
+        logger.info("LangGraph run created successfully for thread %s", thread_id)
+
+        # Add a comment to Jira issue with trace info
+        trace_url = get_trace_url(run.get("run_id", ""))
+        if trace_url:
+            await jira_add_comment(
+                issue_key,
+                f"On it! I'm working on this issue. [View trace]({trace_url})",
+            )
+
+
+def _extract_text_from_adf(adf: dict[str, Any]) -> str:
+    """Extract plain text from Atlassian Document Format.
+
+    Args:
+        adf: The ADF document structure
+
+    Returns:
+        Extracted plain text
+    """
+    text_parts = []
+
+    def extract_from_node(node: dict[str, Any] | list) -> None:
+        if isinstance(node, list):
+            for item in node:
+                extract_from_node(item)
+        elif isinstance(node, dict):
+            if node.get("type") == "text":
+                text = node.get("text", "")
+                if text:
+                    text_parts.append(text)
+            elif "content" in node:
+                extract_from_node(node["content"])
+
+    extract_from_node(adf)
+    return "\n".join(text_parts)
+
+
+@app.post("/webhooks/jira")
+async def jira_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+    """Handle Jira Automation webhooks.
+
+    Triggers a new LangGraph run when a Jira issue comment mentions @openswe.
+    """
+    logger.info("Received Jira webhook")
+    body = await request.body()
+
+    # Verify webhook secret
+    provided_secret = request.headers.get("X-Jira-Webhook-Secret", "")
+    if not verify_jira_webhook_secret(body, JIRA_WEBHOOK_SECRET, provided_secret):
+        logger.warning("Invalid webhook secret")
+        raise HTTPException(status_code=401, detail="Invalid webhook secret")
+
+    try:
+        payload = json.loads(body)
+    except json.JSONDecodeError:
+        logger.exception("Failed to parse webhook JSON")
+        return {"status": "error", "message": "Invalid JSON"}
+
+    # Parse and validate payload
+    parsed = parse_jira_webhook_payload(payload)
+    if not parsed:
+        logger.warning("Invalid webhook payload")
+        return {"status": "error", "message": "Invalid payload"}
+
+    issue_key = parsed["issue_key"]
+    comment_body = parsed["comment_body"]
+
+    # Check for bot mention
+    if not jira_contains_bot_mention(comment_body):
+        logger.debug("Ignoring webhook: comment doesn't mention @openswe")
+        return {"status": "ignored", "reason": "Comment doesn't mention @openswe"}
+
+    # Extract repo config from comment body
+    repo_config = jira_extract_repo_from_text(comment_body)
+    if not repo_config:
+        logger.debug("No repo found in comment body, using default")
+        repo_config = {"owner": DEFAULT_REPO_OWNER, "name": DEFAULT_REPO_NAME}
+
+    if not _is_repo_org_allowed(repo_config):
+        logger.warning(
+            "Rejecting Jira webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
+            repo_config.get("owner"),
+        )
+        return {"status": "ignored", "reason": "Repository org not in allowlist"}
+
+    repo_owner = repo_config["owner"]
+    repo_name = repo_config["name"]
+
+    logger.info(
+        "Accepted webhook for issue '%s', scheduling background task",
+        issue_key,
+    )
+    background_tasks.add_task(process_jira_issue, parsed, repo_config)
+
+    return {
+        "status": "accepted",
+        "message": f"Processing issue '{issue_key}' for repo {repo_owner}/{repo_name}",
+    }
+
+
+@app.get("/webhooks/jira")
+async def jira_webhook_verify() -> dict[str, str]:
+    """Verify endpoint for Jira webhook setup."""
+    return {"status": "ok", "message": "Jira webhook endpoint is active"}

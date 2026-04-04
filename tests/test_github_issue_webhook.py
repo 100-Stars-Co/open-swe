@@ -72,9 +72,7 @@ def test_build_github_issue_prompt_includes_issue_context() -> None:
 
 def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
     # bracesproul is not in GITHUB_USER_EMAIL_MAP so the body is wrapped in untrusted tags
-    prompt = webapp.build_github_issue_followup_prompt(
-        "bracesproul", "Please handle this"
-    )
+    prompt = webapp.build_github_issue_followup_prompt("bracesproul", "Please handle this")
 
     expected = (
         f"**bracesproul:**\n"
@@ -90,9 +88,7 @@ def test_build_github_issue_followup_prompt_only_includes_comment() -> None:
 def test_github_webhook_accepts_issue_events(monkeypatch) -> None:
     called: dict[str, object] = {}
 
-    async def fake_process_github_issue(
-        payload: dict[str, object], event_type: str
-    ) -> None:
+    async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
         called["payload"] = payload
         called["event_type"] = event_type
 
@@ -126,9 +122,7 @@ def test_github_webhook_ignores_issue_events_without_body_or_title_change(
 ) -> None:
     called = False
 
-    async def fake_process_github_issue(
-        payload: dict[str, object], event_type: str
-    ) -> None:
+    async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
         nonlocal called
         called = True
 
@@ -161,9 +155,7 @@ def test_github_webhook_ignores_issue_events_without_body_or_title_change(
 def test_github_webhook_accepts_issue_comment_events(monkeypatch) -> None:
     called: dict[str, object] = {}
 
-    async def fake_process_github_issue(
-        payload: dict[str, object], event_type: str
-    ) -> None:
+    async def fake_process_github_issue(payload: dict[str, object], event_type: str) -> None:
         called["payload"] = payload
         called["event_type"] = event_type
 
@@ -192,9 +184,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(
 ) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_or_resolve_thread_github_token(
-        thread_id: str, email: str
-    ) -> str | None:
+    async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
         captured["thread_id"] = thread_id
         captured["email"] = email
         return "user-token"
@@ -241,16 +231,12 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(
         "get_github_app_installation_token",
         fake_get_github_app_installation_token,
     )
-    monkeypatch.setattr(
-        webapp, "_thread_exists", lambda thread_id: asyncio.sleep(0, result=False)
-    )
+    monkeypatch.setattr(webapp, "_thread_exists", lambda thread_id: asyncio.sleep(0, result=False))
     monkeypatch.setattr(webapp, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(
-        webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
-    )
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
 
     asyncio.run(
         webapp.process_github_issue(
@@ -279,9 +265,7 @@ def test_process_github_issue_uses_resolved_user_token_for_reaction(
 def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) -> None:
     captured: dict[str, object] = {}
 
-    async def fake_get_or_resolve_thread_github_token(
-        thread_id: str, email: str
-    ) -> str | None:
+    async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
         return "user-token"
 
     async def fake_get_github_app_installation_token() -> str | None:
@@ -301,9 +285,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     async def fake_fetch_issue_comments(
         repo_config: dict[str, str], issue_number: int, *, token: str | None = None
     ) -> list[dict[str, object]]:
-        raise AssertionError(
-            "fetch_issue_comments should not be called for follow-up prompts"
-        )
+        raise AssertionError("fetch_issue_comments should not be called for follow-up prompts")
 
     async def fake_thread_exists(thread_id: str) -> bool:
         return True
@@ -333,9 +315,7 @@ def test_process_github_issue_existing_thread_uses_followup_prompt(monkeypatch) 
     monkeypatch.setattr(webapp, "fetch_issue_comments", fake_fetch_issue_comments)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(
-        webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
-    )
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"})
     monkeypatch.setattr(
         github_comments, "GITHUB_USER_EMAIL_MAP", {"octocat": "octocat@example.com"}
     )
@@ -387,9 +367,7 @@ def test_github_webhook_accepts_debug_issue_comment_payload(monkeypatch) -> None
     """Webhook endpoint must accept the real captured issue_comment payload."""
     called: dict[str, Any] = {}
 
-    async def fake_process_github_issue(
-        payload: dict[str, Any], event_type: str
-    ) -> None:
+    async def fake_process_github_issue(payload: dict[str, Any], event_type: str) -> None:
         called["payload"] = payload
         called["event_type"] = event_type
 
@@ -415,9 +393,7 @@ def test_process_github_issue_with_debug_payload_builds_expected_prompt(
     """process_github_issue must build a coherent prompt from the production payload."""
     captured: dict[str, Any] = {}
 
-    async def fake_get_or_resolve_thread_github_token(
-        thread_id: str, email: str
-    ) -> str | None:
+    async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
         captured["email"] = email
         return "bot-token"
 
@@ -456,9 +432,7 @@ def test_process_github_issue_with_debug_payload_builds_expected_prompt(
         return False
 
     class _FakeRunsClient:
-        async def create(
-            self, thread_id: str, agent: str, **kwargs: Any
-        ) -> dict[str, str]:
+        async def create(self, thread_id: str, agent: str, **kwargs: Any) -> dict[str, str]:
             captured["thread_id"] = thread_id
             captured["prompt"] = kwargs["input"]["messages"][0]["content"]
             return {"run_id": "fake-run-id"}
@@ -482,9 +456,7 @@ def test_process_github_issue_with_debug_payload_builds_expected_prompt(
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
     # puvanath is already in the real GITHUB_USER_EMAIL_MAP but patch both for isolation
-    monkeypatch.setattr(
-        webapp, "GITHUB_USER_EMAIL_MAP", {"puvanath": "puvanath@100stars.com"}
-    )
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"puvanath": "puvanath@100stars.com"})
     monkeypatch.setattr(
         github_comments, "GITHUB_USER_EMAIL_MAP", {"puvanath": "puvanath@100stars.com"}
     )
@@ -514,9 +486,7 @@ def test_process_github_issue_debug_payload_followup_when_thread_exists(
     """When the thread already exists the agent receives only the new comment."""
     captured: dict[str, Any] = {}
 
-    async def fake_get_or_resolve_thread_github_token(
-        thread_id: str, email: str
-    ) -> str | None:
+    async def fake_get_or_resolve_thread_github_token(thread_id: str, email: str) -> str | None:
         return "bot-token"
 
     async def fake_get_github_app_installation_token() -> str | None:
@@ -540,9 +510,7 @@ def test_process_github_issue_debug_payload_followup_when_thread_exists(
         return False
 
     class _FakeRunsClient:
-        async def create(
-            self, thread_id: str, agent: str, **kwargs: Any
-        ) -> dict[str, str]:
+        async def create(self, thread_id: str, agent: str, **kwargs: Any) -> dict[str, str]:
             captured["prompt"] = kwargs["input"]["messages"][0]["content"]
             return {"run_id": "fake-run-id"}
 
@@ -563,9 +531,7 @@ def test_process_github_issue_debug_payload_followup_when_thread_exists(
     monkeypatch.setattr(webapp, "react_to_github_comment", fake_react_to_github_comment)
     monkeypatch.setattr(webapp, "is_thread_active", fake_is_thread_active)
     monkeypatch.setattr(webapp, "get_client", lambda url: _FakeLangGraphClient())
-    monkeypatch.setattr(
-        webapp, "GITHUB_USER_EMAIL_MAP", {"puvanath": "puvanath@100stars.com"}
-    )
+    monkeypatch.setattr(webapp, "GITHUB_USER_EMAIL_MAP", {"puvanath": "puvanath@100stars.com"})
     monkeypatch.setattr(
         github_comments, "GITHUB_USER_EMAIL_MAP", {"puvanath": "puvanath@100stars.com"}
     )

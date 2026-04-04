@@ -38,7 +38,7 @@ make format-check     # ruff format --check (CI-friendly)
 | File              | Role                                                                               |
 | ----------------- | ---------------------------------------------------------------------------------- |
 | `agent/server.py` | `get_agent()` — builds the LangGraph agent; called by LangGraph runtime            |
-| `agent/webapp.py` | FastAPI app with webhook handlers: `POST /slack`, `POST /linear`, `POST /github`   |
+| `agent/webapp.py` | FastAPI app with webhook handlers: `POST /slack`, `POST /linear`, `POST /github`, `POST /jira`   |
 | `agent/prompt.py` | `construct_system_prompt()` — assembles system prompt from structured sections      |
 
 ### Directory Structure
@@ -61,7 +61,7 @@ agent/
 ### Agent Execution Flow
 
 ```
-Webhook (Slack/Linear/GitHub)
+Webhook (Slack/Linear/GitHub/Jira)
   → webapp.py verifies signature, extracts context
   → create/reconnect sandbox (thread-persistent)
   → clone/pull repo, read CLAUDE.md (or AGENTS.md) from repo root
@@ -163,6 +163,7 @@ LANGSMITH_TENANT_ID_PROD
 # Optional integrations
 LINEAR_API_KEY / LINEAR_WEBHOOK_SECRET
 SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET
+JIRA_BASE_URL / JIRA_API_TOKEN / JIRA_USER_EMAIL / JIRA_WEBHOOK_SECRET
 
 # Sandbox
 SANDBOX_TYPE                # "langsmith" | "daytona" | "runloop" | "modal" | "local" | "e2b" | "opensandbox"

@@ -26,9 +26,7 @@ from typing import Any
 import httpx
 
 # Suppress langsmith alpha warning
-warnings.filterwarnings(
-    "ignore", message="langsmith.sandbox is in alpha", category=FutureWarning
-)
+warnings.filterwarnings("ignore", message="langsmith.sandbox is in alpha", category=FutureWarning)
 
 # Default OpenSandbox URL
 DEFAULT_OPENSANDBOX_URL = "http://127.0.0.1:9000"
@@ -105,9 +103,7 @@ class OpenSandboxDirectClient:
         response.raise_for_status()
         return response.json()
 
-    async def wait_for_sandbox(
-        self, sandbox_id: str, timeout: int = 60
-    ) -> dict[str, Any]:
+    async def wait_for_sandbox(self, sandbox_id: str, timeout: int = 60) -> dict[str, Any]:
         """Wait for sandbox to be ready."""
         start = time.time()
         while time.time() - start < timeout:
@@ -116,9 +112,7 @@ class OpenSandboxDirectClient:
             # Handle different status formats (string or dict)
             if isinstance(status, dict):
                 state = (
-                    status.get("state", "").lower()
-                    if "state" in status
-                    else str(status).lower()
+                    status.get("state", "").lower() if "state" in status else str(status).lower()
                 )
             elif isinstance(status, str):
                 state = status.lower()
@@ -224,9 +218,7 @@ class OpenSandboxDirectClient:
         """Read a file from the sandbox via files API."""
         execd_path = self._get_execd_proxy_path(sandbox_id)
 
-        response = await self.client.get(
-            f"{execd_path}/files/download", params={"path": path}
-        )
+        response = await self.client.get(f"{execd_path}/files/download", params={"path": path})
         response.raise_for_status()
 
         content_type = response.headers.get("content-type", "")
@@ -284,7 +276,9 @@ async def run_tests(opensandbox_url: str) -> int:
     try:
         # Test 1: Create sandbox
         print("\n📦 Test 1: Creating sandbox...")
-        image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+        image = (
+            "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+        )
         result = await client.create_sandbox(
             image=image,
             timeout=300,
@@ -296,21 +290,19 @@ async def run_tests(opensandbox_url: str) -> int:
         # Wait for sandbox to be ready
         print("\n⏳ Waiting for sandbox to be ready...")
         await client.wait_for_sandbox(sandbox_id, timeout=60)
-        print(f"✓ Sandbox is running")
+        print("✓ Sandbox is running")
 
         # Test 2: Execute command
         print("\n💻 Test 2: Executing command...")
         print("   (This requires working sandbox proxy networking on the server)")
         try:
-            result = await client.execute_command(
-                sandbox_id, "echo 'Hello from OpenSandbox!'"
-            )
+            result = await client.execute_command(sandbox_id, "echo 'Hello from OpenSandbox!'")
             stdout = result.get("stdout", "")
             stderr = result.get("stderr", "")
             exit_code = result.get("exitCode", 0)
             output = stdout + stderr
             if exit_code == 0 and "Hello from OpenSandbox" in output:
-                print(f"✓ Command executed successfully")
+                print("✓ Command executed successfully")
                 print(f"   Output: {output.strip()}")
             else:
                 print(f"⚠ Command failed with exit code {exit_code}")
@@ -318,9 +310,7 @@ async def run_tests(opensandbox_url: str) -> int:
                 print(f"   stderr: {stderr}")
         except Exception as e:
             print(f"⚠ Command execution failed: {e}")
-            print(
-                "   This is likely due to sandbox proxy networking not being configured."
-            )
+            print("   This is likely due to sandbox proxy networking not being configured.")
             print("   The server creates sandboxes but cannot route to execd inside.")
 
         # Test 3: Write file
@@ -340,7 +330,7 @@ async def run_tests(opensandbox_url: str) -> int:
         try:
             content = await client.read_file(sandbox_id, "/tmp/test_opensandbox.txt")
             if b"Hello World from OpenSandbox" in content:
-                print(f"✓ File read successfully")
+                print("✓ File read successfully")
                 print(f"   Content: {content.decode().strip()}")
             else:
                 print(f"⚠ File content mismatch: {content}")

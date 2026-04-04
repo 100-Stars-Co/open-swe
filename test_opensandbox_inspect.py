@@ -7,11 +7,9 @@ This script creates a sandbox and keeps it alive for inspection.
 from __future__ import annotations
 
 import asyncio
-import json
 import os
 import subprocess
 import sys
-import time
 from typing import Any
 
 import httpx
@@ -55,12 +53,7 @@ class InspectorClient:
 def run_docker_command(cmd: list[str]) -> str:
     """Run a docker command and return output."""
     try:
-        result = subprocess.run(
-            ["docker"] + cmd,
-            capture_output=True,
-            text=True,
-            timeout=30
-        )
+        result = subprocess.run(["docker"] + cmd, capture_output=True, text=True, timeout=30)
         return result.stdout + result.stderr
     except Exception as e:
         return f"Error: {e}"
@@ -71,10 +64,7 @@ async def inspect_sandbox(sandbox_id: str) -> None:
     print("\n🔍 Inspecting sandbox container...")
 
     # Find the container
-    find_cmd = [
-        "ps", "-f", f"label=opensandbox.io/sandbox-id={sandbox_id}",
-        "--format", "{{.ID}}"
-    ]
+    find_cmd = ["ps", "-f", f"label=opensandbox.io/sandbox-id={sandbox_id}", "--format", "{{.ID}}"]
     container_id = run_docker_command(find_cmd).strip()
 
     if not container_id:
@@ -113,7 +103,9 @@ async def inspect_sandbox(sandbox_id: str) -> None:
 
     # Check bootstrap script
     print("\n📜 Checking bootstrap script:")
-    bootstrap_result = run_docker_command(["exec", container_id, "cat", "/opt/opensandbox/bootstrap.sh"])
+    bootstrap_result = run_docker_command(
+        ["exec", container_id, "cat", "/opt/opensandbox/bootstrap.sh"]
+    )
     print(f"   {bootstrap_result}")
 
 
@@ -130,7 +122,9 @@ async def main() -> int:
 
     try:
         print("\n📦 Creating sandbox...")
-        image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+        image = (
+            "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+        )
         result = await client.create_sandbox(image=image, timeout=300)
         sandbox_id = result.get("id") or result.get("sandboxId")
         print(f"✓ Sandbox created: {sandbox_id}")
@@ -155,7 +149,7 @@ async def main() -> int:
         print("\n" + "=" * 60)
         print("Sandbox is still running for manual inspection.")
         print(f"Container: docker ps -f label=opensandbox.io/sandbox-id={sandbox_id}")
-        print(f"Logs: docker exec <container> cat /tmp/execd.log")
+        print("Logs: docker exec <container> cat /tmp/execd.log")
         print("=" * 60)
         print("\nPress Enter to cleanup and exit...")
         input()
@@ -168,6 +162,7 @@ async def main() -> int:
     except Exception as e:
         print(f"\n❌ Error: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
     finally:
