@@ -1,4 +1,5 @@
 """Main entry point and CLI loop for Open SWE agent."""
+
 # ruff: noqa: E402
 
 # Load environment variables from .env file before other imports
@@ -70,6 +71,7 @@ from .tools import (
     slack_thread_reply,
     submit_pr_review,
     update_pr_review,
+    web_search,
 )
 from .utils.auth import resolve_github_token
 from .utils.model import make_model
@@ -85,7 +87,9 @@ from .utils.agents_md import read_agents_md_in_sandbox
 from .utils.github import (
     _CRED_FILE_PATH,
     cleanup_git_credentials,
+    git_current_branch,
     git_has_uncommitted_changes,
+    git_pull_branch,
     is_valid_git_repo,
     remove_directory,
     setup_git_credentials,
@@ -123,18 +127,24 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
     work_dir = await aresolve_sandbox_work_dir(sandbox_backend)
     repo_dir = await aresolve_repo_dir(sandbox_backend, repo)
     clean_url = f"https://github.com/{owner}/{repo}.git"
-    cred_helper_arg = f"-c credential.helper='store --file={_CRED_FILE_PATH}'"
+    cred_helper = shlex.quote(f"store --file={_CRED_FILE_PATH}")
     safe_repo_dir = shlex.quote(repo_dir)
     safe_clean_url = shlex.quote(clean_url)
 
     logger.info("Resolved sandbox work dir to %s", work_dir)
 
-    is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
+    is_git_repo = await loop.run_in_executor(
+        None, is_valid_git_repo, sandbox_backend, repo_dir
+    )
 
     if not is_git_repo:
-        logger.warning("Repo directory missing or not a valid git repo at %s, removing", repo_dir)
+        logger.warning(
+            "Repo directory missing or not a valid git repo at %s, removing", repo_dir
+        )
         try:
-            removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
+            removed = await loop.run_in_executor(
+                None, remove_directory, sandbox_backend, repo_dir
+            )
             if not removed:
                 msg = f"Failed to remove invalid directory at {repo_dir}"
                 logger.error(msg)
@@ -150,17 +160,29 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         )
 
         if has_changes:
-            logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
+            logger.warning(
+                "Repo has uncommitted changes at %s, skipping pull", repo_dir
+            )
             return repo_dir
 
         logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
 
-        await loop.run_in_executor(None, setup_git_credentials, sandbox_backend, token)
         try:
+            current_branch = await loop.run_in_executor(
+                None, git_current_branch, sandbox_backend, repo_dir
+            )
+            if not current_branch:
+                msg = f"Failed to determine current branch for repo at {repo_dir}"
+                logger.error(msg)
+                raise RuntimeError(msg)
+
             pull_result = await loop.run_in_executor(
                 None,
-                sandbox_backend.execute,
-                f"cd {repo_dir} && git {cred_helper_arg} pull origin $(git rev-parse --abbrev-ref HEAD)",
+                git_pull_branch,
+                sandbox_backend,
+                repo_dir,
+                current_branch,
+                token,
             )
             logger.debug("Git pull result: exit_code=%s", pull_result.exit_code)
             if pull_result.exit_code != 0:
@@ -172,8 +194,6 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         except Exception:
             logger.exception("Failed to execute git pull")
             raise
-        finally:
-            await loop.run_in_executor(None, cleanup_git_credentials, sandbox_backend)
 
         logger.info("Repo updated at %s", repo_dir)
         return repo_dir
@@ -184,7 +204,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         result = await loop.run_in_executor(
             None,
             sandbox_backend.execute,
-            f"git {cred_helper_arg} clone {safe_clean_url} {safe_repo_dir}",
+            f"git -c credential.helper={cred_helper} clone {safe_clean_url} {safe_repo_dir}",
         )
         logger.debug("Git clone result: exit_code=%s", result.exit_code)
     except Exception:
@@ -261,6 +281,7 @@ def graph_loaded_for_execution(config: RunnableConfig) -> bool:
     )
 
 
+DEFAULT_LLM_MODEL_ID = "anthropic:claude-opus-4-6"
 DEFAULT_RECURSION_LIMIT = 1_000
 
 
@@ -275,7 +296,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     repo_name = repo_config.get("name")
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        logger.info("No thread_id or not for execution, returning agent without sandbox")
+        logger.info(
+            "No thread_id or not for execution, returning agent without sandbox"
+        )
         return create_deep_agent(
             system_prompt="",
             tools=[],
@@ -316,7 +339,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
+        await client.threads.update(
+            thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING}
+        )
 
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
@@ -338,7 +363,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         except Exception:
             logger.exception("Failed to create sandbox or clone repo")
             try:
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                await client.threads.update(
+                    thread_id=thread_id, metadata={"sandbox_id": None}
+                )
                 logger.info("Reset sandbox_id to None for thread %s", thread_id)
             except Exception:
                 logger.exception("Failed to reset sandbox_id metadata")
@@ -350,7 +377,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
-            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
+            logger.warning(
+                "Failed to connect to existing sandbox %s, creating new one", sandbox_id
+            )
             # Reset sandbox_id and create a new sandbox
             await client.threads.update(
                 thread_id=thread_id,
@@ -362,7 +391,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
+                await client.threads.update(
+                    thread_id=thread_id, metadata={"sandbox_id": None}
+                )
                 raise
 
         metadata = get_config().get("metadata", {})
@@ -394,7 +425,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     branch_name = get_config().get("metadata", {}).get("branch_name")
     if branch_name:
-        logger.info("Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id)
+        logger.info(
+            "Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id
+        )
         loop = asyncio.get_event_loop()
         safe_repo_dir = shlex.quote(repo_dir)
         safe_branch = shlex.quote(branch_name)
@@ -413,7 +446,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
-    agents_md, agents_md_filename = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
+    agents_md, agents_md_filename = await read_agents_md_in_sandbox(
+        sandbox_backend, repo_dir
+    )
 
     # Load available skills (wrapped in thread to avoid blocking)
     skills_dir = Path(__file__).parent / "skills"
@@ -447,6 +482,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         tools=[
             http_request,
             fetch_url,
+            web_search,
             commit_and_open_pr,
             linear_comment,
             linear_create_issue,
@@ -490,7 +526,9 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         # Merge callbacks into config if they exist, otherwise create new
         merged_config = dict(config)
         if merged_config.get("callbacks"):
-            merged_config["callbacks"] = list(merged_config["callbacks"]) + [langfuse_handler]
+            merged_config["callbacks"] = list(merged_config["callbacks"]) + [
+                langfuse_handler
+            ]
         else:
             merged_config["callbacks"] = [langfuse_handler]
         return agent.with_config(merged_config)
