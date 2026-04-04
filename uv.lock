@@ -1954,6 +1954,9 @@ langsmith = [
     { name = "langchain-runloop" },
     { name = "langsmith" },
 ]
+opensandbox = [
+    { name = "opensandbox-code-interpreter" },
+]
 tracing = [
     { name = "langfuse" },
 ]
@@ -1979,6 +1982,7 @@ requires-dist = [
     { name = "langgraph-sdk", specifier = ">=0.1.0" },
     { name = "langsmith", marker = "extra == 'langsmith'", specifier = ">=0.7.1" },
     { name = "markdownify", specifier = ">=1.2.2" },
+    { name = "opensandbox-code-interpreter", marker = "extra == 'opensandbox'", specifier = ">=0.1.0" },
     { name = "pyjwt", specifier = ">=2.8.0" },
     { name = "pytest", marker = "extra == 'dev'", specifier = ">=7.0.0" },
     { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.21.0" },
@@ -1986,7 +1990,7 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.1.0" },
     { name = "uvicorn", specifier = ">=0.24.0" },
 ]
-provides-extras = ["dev", "tracing", "langsmith"]
+provides-extras = ["dev", "tracing", "langsmith", "opensandbox"]
 
 [[package]]
 name = "openai"
@@ -2005,6 +2009,34 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/92/e5/3d197a0947a166649f566706d7a4c8f7fe38f1fa7b24c9bcffe4c7591d44/openai-2.21.0.tar.gz", hash = "sha256:81b48ce4b8bbb2cc3af02047ceb19561f7b1dc0d4e52d1de7f02abfd15aa59b7", size = 644374, upload-time = "2026-02-14T00:12:01.577Z" }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/56/0a89092a453bb2c676d66abee44f863e742b2110d4dbb1dbcca3f7e5fc33/openai-2.21.0-py3-none-any.whl", hash = "sha256:0bc1c775e5b1536c294eded39ee08f8407656537ccc71b1004104fe1602e267c", size = 1103065, upload-time = "2026-02-14T00:11:59.603Z" },
+]
+
+[[package]]
+name = "opensandbox"
+version = "0.1.6"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "attrs" },
+    { name = "httpx" },
+    { name = "pydantic" },
+    { name = "python-dateutil" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/81/68/493e98dfc5be745cc2d199259d79af49b89f7973619a9b7e36d0d43d74b8/opensandbox-0.1.6.tar.gz", hash = "sha256:6a69c690342f3d28820154b4f7f27ce33fd4cf42e3982016535f6fc9de344324", size = 112275, upload-time = "2026-03-27T03:51:09.155Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/0c/12/5454ec8eb63de9a4d73ad26cf1adad9cd760aba62dadd4dbb18eee5765d9/opensandbox-0.1.6-py3-none-any.whl", hash = "sha256:a8f7eeb124eddcf97c691230f55ef77413b9b727ede346e6e9219d8d56c61c43", size = 281317, upload-time = "2026-03-27T03:51:07.695Z" },
+]
+
+[[package]]
+name = "opensandbox-code-interpreter"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "opensandbox" },
+    { name = "pydantic" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/9b/8d/dc1b3a5eaa89a5780678b91bec2beee3d11d00ed24a5edb0f8dbb4b26a99/opensandbox_code_interpreter-0.1.2.tar.gz", hash = "sha256:046bd3a3a045f9d30ee6691fdd63f4e81db06fd64a8f045d2981ebbc1ebbb244", size = 24156, upload-time = "2026-03-27T04:37:24.409Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/6f/0a/e20c6eec6f3ac22b3edb59c1cf5ba9327a99933e9071806f54b48a274805/opensandbox_code_interpreter-0.1.2-py3-none-any.whl", hash = "sha256:bea53fb0032f13fae517ac1fed36d972f7f660304029dc3d5eef18a0dac2b916", size = 39981, upload-time = "2026-03-27T04:37:23.142Z" },
 ]
 
 [[package]]

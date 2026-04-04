@@ -303,7 +303,9 @@ async def _upsert_slack_thread_repo_metadata(
 ) -> None:
     """Persist the selected repo config on the thread metadata."""
     try:
-        await langgraph_client.threads.update(thread_id=thread_id, metadata={"repo": repo_config})
+        await langgraph_client.threads.update(
+            thread_id=thread_id, metadata={"repo": repo_config}
+        )
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             try:
@@ -334,7 +336,9 @@ async def check_if_using_repo_msg_sent(
     return False
 
 
-async def get_slack_repo_config(message: str, channel_id: str, thread_ts: str) -> dict[str, str]:
+async def get_slack_repo_config(
+    message: str, channel_id: str, thread_ts: str
+) -> dict[str, str]:
     """Resolve repository configuration for Slack-triggered runs."""
     default_owner = SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER
     default_name = SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME
@@ -658,11 +662,16 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         )
 
         if queued:
-            logger.info("Message queued for thread %s, will be processed by middleware", thread_id)
+            logger.info(
+                "Message queued for thread %s, will be processed by middleware",
+                thread_id,
+            )
             langgraph_client = get_client(url=LANGGRAPH_URL)
             runs = await langgraph_client.runs.list(thread_id, limit=1)
             if runs:
-                await post_linear_trace_comment(issue_id, runs[0]["run_id"], triggering_comment_id)
+                await post_linear_trace_comment(
+                    issue_id, runs[0]["run_id"], triggering_comment_id
+                )
         else:
             logger.error("Failed to queue message for thread %s", thread_id)
     else:
@@ -679,7 +688,9 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
         await post_linear_trace_comment(issue_id, run["run_id"], triggering_comment_id)
 
 
-async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[str, str]) -> None:
+async def process_slack_mention(
+    event_data: dict[str, Any], repo_config: dict[str, str]
+) -> None:
     """Process a Slack app mention by creating or interrupting a thread run."""
     channel_id = event_data.get("channel_id", "")
     thread_ts = event_data.get("thread_ts", "")
@@ -769,7 +780,11 @@ async def process_slack_mention(event_data: dict[str, Any], repo_config: dict[st
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
     image_urls = dedupe_urls(
-        [url for msg in context_messages for url in extract_image_urls(msg.get("text", ""))]
+        [
+            url
+            for msg in context_messages
+            for url in extract_image_urls(msg.get("text", ""))
+        ]
         + [
             f["url_private"]
             for msg in context_messages
@@ -844,7 +859,9 @@ def verify_linear_signature(body: bytes, signature: str, secret: str) -> bool:
         True if signature is valid, False otherwise
     """
     if not secret:
-        logger.warning("LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request")
+        logger.warning(
+            "LINEAR_WEBHOOK_SECRET is not configured — rejecting webhook request"
+        )
         return False
 
     expected = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
@@ -986,7 +1003,9 @@ async def linear_webhook_verify() -> dict[str, str]:
 
 
 @app.post("/webhooks/slack")
-async def slack_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+async def slack_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
     """Handle Slack Event API webhooks for app mentions."""
     body = await request.body()
 
@@ -1102,7 +1121,9 @@ def _build_github_issue_comments_text(comments: list[dict[str, Any]]) -> str:
     lines: list[str] = []
     for comment in comments:
         body = comment.get("body", "")
-        if not body or any(body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES):
+        if not body or any(
+            body.startswith(prefix) for prefix in _GITHUB_BOT_MESSAGE_PREFIXES
+        ):
             continue
         author = comment.get("author", "unknown")
         formatted_body = format_github_comment_body_for_prompt(author, body)
@@ -1128,7 +1149,9 @@ def build_github_issue_prompt(
     triggered_by_line = f"## Triggered by: {github_login}\n\n" if github_login else ""
     comments_text = _build_github_issue_comments_text(comments)
     sanitized_title = sanitize_github_comment_body(title)
-    formatted_body = format_github_comment_body_for_prompt(issue_author or github_login, body)
+    formatted_body = format_github_comment_body_for_prompt(
+        issue_author or github_login, body
+    )
     return (
         "Please work on the following GitHub issue:\n\n"
         f"## Repository: {repo_config.get('owner')}/{repo_config.get('name')}\n\n"
@@ -1144,9 +1167,7 @@ def build_github_issue_prompt(
 
 def build_github_issue_followup_prompt(github_login: str, comment_body: str) -> str:
     """Build the prompt for a follow-up GitHub issue comment."""
-    return (
-        f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
-    )
+    return f"**{github_login}:**\n{format_github_comment_body_for_prompt(github_login, comment_body)}"
 
 
 def build_github_issue_update_prompt(github_login: str, title: str, body: str) -> str:
@@ -1176,7 +1197,9 @@ async def _trigger_or_queue_run(
         await queue_message_for_thread(thread_id, prompt)
         return
 
-    logger.info("Creating LangGraph run for thread %s from GitHub PR comment", thread_id)
+    logger.info(
+        "Creating LangGraph run for thread %s from GitHub PR comment", thread_id
+    )
     langgraph_client = get_client(url=LANGGRAPH_URL)
     await langgraph_client.runs.create(
         thread_id,
@@ -1256,7 +1279,11 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         name = repo_config.get("name", "")
         stable_key = f"{owner}/{name}/pr/{pr_number}"
         thread_id = str(uuid.uuid5(uuid.NAMESPACE_URL, stable_key))
-        logger.info("Generated thread_id %s for non-open-swe branch '%s'", thread_id, branch_name)
+        logger.info(
+            "Generated thread_id %s for non-open-swe branch '%s'",
+            thread_id,
+            branch_name,
+        )
         langgraph_client = get_client(url=LANGGRAPH_URL)
         thread_metadata = {"branch_name": branch_name}
         if base_branch:
@@ -1271,7 +1298,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                     metadata=thread_metadata,
                 )
             else:
-                logger.warning("Failed to persist branch_name metadata for thread %s", thread_id)
+                logger.warning(
+                    "Failed to persist branch_name metadata for thread %s", thread_id
+                )
     else:
         # Thread already exists - update metadata with base_branch if available
         if base_branch:
@@ -1281,7 +1310,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
                     thread_id, metadata={"base_branch": base_branch}
                 )
             except Exception:
-                logger.warning("Failed to update base_branch metadata for thread %s", thread_id)
+                logger.warning(
+                    "Failed to update base_branch metadata for thread %s", thread_id
+                )
 
     email = GITHUB_USER_EMAIL_MAP.get(github_login, "")
     if not email:
@@ -1307,7 +1338,9 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
         logger.warning("No PR number found in payload, skipping")
         return
 
-    comments = await fetch_pr_comments_since_last_tag(repo_config, pr_number, token=github_token)
+    comments = await fetch_pr_comments_since_last_tag(
+        repo_config, pr_number, token=github_token
+    )
     if not comments:
         logger.info("No comments found since last @open-swe tag for PR %s", pr_number)
         return
@@ -1366,7 +1399,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
     comment_id = comment.get("id")
     if event_type == "issue_comment" and comment_id:
         if not reaction_token:
-            logger.warning("No GitHub token available to react to issue comment %s", comment_id)
+            logger.warning(
+                "No GitHub token available to react to issue comment %s", comment_id
+            )
         else:
             reacted = await react_to_github_comment(
                 repo_config,
@@ -1389,7 +1424,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
         comments = await fetch_issue_comments(
             repo_config, issue_number, token=github_token or app_token
         )
-        if comment_id and not any(item.get("comment_id") == comment_id for item in comments):
+        if comment_id and not any(
+            item.get("comment_id") == comment_id for item in comments
+        ):
             comments.append(
                 {
                     "body": comment.get("body", ""),
@@ -1441,7 +1478,9 @@ async def process_github_issue(payload: dict[str, Any], event_type: str) -> None
 
 
 @app.post("/webhooks/github")
-async def github_webhook(request: Request, background_tasks: BackgroundTasks) -> dict[str, str]:
+async def github_webhook(
+    request: Request, background_tasks: BackgroundTasks
+) -> dict[str, str]:
     """Handle GitHub webhooks for issue and PR events that tag @open-swe."""
     body = await request.body()
 
@@ -1475,25 +1514,38 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
         return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
     issue = payload.get("issue", {})
-    is_pull_request_comment = bool(event_type == "issue_comment" and issue.get("pull_request"))
-    is_issue_comment = bool(event_type == "issue_comment" and not issue.get("pull_request"))
+    is_pull_request_comment = bool(
+        event_type == "issue_comment" and issue.get("pull_request")
+    )
+    is_issue_comment = bool(
+        event_type == "issue_comment" and not issue.get("pull_request")
+    )
     is_issue_event = event_type == "issues"
 
     if is_issue_event:
         action = payload.get("action", "")
         if action not in _SUPPORTED_GH_ISSUE_ACTIONS:
             logger.info("Ignoring unsupported GitHub issue action: %s", action)
-            return {"status": "ignored", "reason": f"Unsupported GitHub issue action: {action}"}
+            return {
+                "status": "ignored",
+                "reason": f"Unsupported GitHub issue action: {action}",
+            }
         if action == "edited":
             changes = payload.get("changes", {})
             if not any(field in changes for field in ("body", "title")):
                 logger.info("Ignoring GitHub issue edit without title/body changes")
-                return {"status": "ignored", "reason": "Issue edit did not change title or body"}
+                return {
+                    "status": "ignored",
+                    "reason": "Issue edit did not change title or body",
+                }
 
         issue_text = f"{issue.get('title', '')}\n\n{issue.get('body', '')}".lower()
         if not any(tag in issue_text for tag in OPEN_SWE_TAGS):
             logger.info("Ignoring issue that does not mention @openswe or @open-swe")
-            return {"status": "ignored", "reason": "Issue does not mention @openswe or @open-swe"}
+            return {
+                "status": "ignored",
+                "reason": "Issue does not mention @openswe or @open-swe",
+            }
 
         logger.info("Accepted GitHub issue webhook, scheduling background task")
         background_tasks.add_task(process_github_issue, payload, event_type)
@@ -1503,9 +1555,14 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
     comment_body = (comment.get("body") or "") if comment else ""
     if not any(tag in comment_body.lower() for tag in OPEN_SWE_TAGS):
         logger.info("Ignoring comment that does not mention @openswe or @open-swe")
-        return {"status": "ignored", "reason": "Comment does not mention @openswe or @open-swe"}
+        return {
+            "status": "ignored",
+            "reason": "Comment does not mention @openswe or @open-swe",
+        }
 
-    logger.info("Accepted GitHub webhook: event=%s, scheduling background task", event_type)
+    logger.info(
+        "Accepted GitHub webhook: event=%s, scheduling background task", event_type
+    )
     if is_pull_request_comment or event_type in {
         "pull_request_review_comment",
         "pull_request_review",
@@ -1515,7 +1572,13 @@ async def github_webhook(request: Request, background_tasks: BackgroundTasks) ->
 
     if is_issue_comment:
         background_tasks.add_task(process_github_issue, payload, event_type)
-        return {"status": "accepted", "message": "Processing GitHub issue comment event"}
+        return {
+            "status": "accepted",
+            "message": "Processing GitHub issue comment event",
+        }
 
     logger.info("Ignoring unsupported GitHub payload shape for event=%s", event_type)
-    return {"status": "ignored", "reason": f"Unsupported payload for event type: {event_type}"}
+    return {
+        "status": "ignored",
+        "reason": f"Unsupported payload for event type: {event_type}",
+    }

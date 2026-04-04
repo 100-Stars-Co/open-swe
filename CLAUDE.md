@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 Open SWE is an open-source LangGraph-based AI coding agent that automates software engineering tasks. It clones GitHub repos into isolated cloud sandboxes, executes commands, modifies files, runs tests, and opens GitHub draft PRs. It's triggered via Slack, Linear, or GitHub webhooks.
 
+See also: [README.md](README.md) for architecture comparison with Stripe Minions, Ramp Inspect, and Coinbase Cloudbot.
+
 ## Common Commands
 
 ```bash
@@ -24,6 +26,7 @@ make integration_tests  # Run integration tests
 # Code quality
 make lint             # ruff check + format --diff
 make format           # ruff format + check --fix
+make format-check     # ruff format --check (CI-friendly)
 ```
 
 **Python:** >= 3.11 (3.12 recommended). Use `uv` for package management.
@@ -48,10 +51,11 @@ agent/
   encryption.py      # Fernet-based token encryption/decryption
   tools/             # Custom tools: commit_and_open_pr, fetch_url, http_request,
                      #   github_comment/review, linear_*, slack_thread_reply
-  middleware/          # Hooks: ToolErrorMiddleware, check_message_queue,
+  middleware/        # Hooks: ToolErrorMiddleware, check_message_queue_before_model,
                      #   ensure_no_empty_msg, open_pr_if_needed
-  integrations/      # Sandbox provider factories: langsmith, daytona, runloop, modal, local, e2b
+  integrations/      # Sandbox provider factories: langsmith, daytona, runloop, modal, local, e2b, opensandbox
   utils/             # Shared helpers: auth, github, slack, linear, sandbox, model, multimodal
+  skills/            # Skill definitions (e.g., playwright_cli.md)
 ```
 
 ### Agent Execution Flow
@@ -69,7 +73,7 @@ Webhook (Slack/Linear/GitHub)
 ### Key Design Patterns
 
 1. **Isolation First** — each task runs in its own cloud sandbox (`SANDBOX_TYPE` env var)
-   - Supported: `langsmith` (default), `daytona`, `modal`, `runloop`, `local`, `e2b`
+   - Supported: `langsmith` (default), `daytona`, `modal`, `runloop`, `local`, `e2b`, `opensandbox`
    - Sandboxes are thread-persistent and auto-recreate on connection failure
 
 2. **Deep Agents Framework** — agent is composed via `create_deep_agent()` from the `deepagents` package
@@ -115,14 +119,26 @@ Webhook (Slack/Linear/GitHub)
 
 ## Conventions
 
-- **Style:** Ruff-enforced. Run `make format` before committing.
+- **Style:** Ruff-enforced (100 char lines). Run `make format` before committing.
 - **Imports:** isort-sorted. Ruff handles automatically.
 - **Type hints:** Required on all new public functions and methods.
 - **Async:** All webhook handlers and agent-facing functions are `async`.
+- **Logging:** Use module-level `logger = logging.getLogger(__name__)`, not `print`.
 - **Tools:** Each tool is a single file in `agent/tools/`. Use the `@tool` decorator from LangChain.
 - **Tests:** Place in `tests/test_<module>.py`. `pytest.mark.asyncio` unnecessary — `asyncio_mode = "auto"` handles it.
 - **No sandbox calls in unit tests** — mock the sandbox client; tests run without a live sandbox.
 - **Target repo conventions** — if the target repo has a `CLAUDE.md` or `AGENTS.md`, that file is automatically injected into the system prompt. Org-specific rules go there. `CLAUDE.md` takes precedence if both exist.
+
+## Reference: Detailed Patterns
+
+For step-by-step instructions on common tasks, see `.github/instructions/`:
+
+| Task | File |
+|------|------|
+| Add a new tool | `open-swe-new-tool.instructions.md` |
+| Add a new sandbox provider | `open-swe-new-sandbox.instructions.md` |
+| Write tests | `open-swe-testing.instructions.md` |
+| Code conventions | `open-swe-conventions.instructions.md` |
 
 ## Environment Variables
 
@@ -149,8 +165,13 @@ LINEAR_API_KEY / LINEAR_WEBHOOK_SECRET
 SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET
 
 # Sandbox
-SANDBOX_TYPE                # "langsmith" | "daytona" | "runloop" | "modal" | "local" | "e2b"
+SANDBOX_TYPE                # "langsmith" | "daytona" | "runloop" | "modal" | "local" | "e2b" | "opensandbox"
 TOKEN_ENCRYPTION_KEY        # Base64 32-byte Fernet key
+
+# OpenSandbox (self-hosted option - https://github.com/alibaba/OpenSandbox)
+OPENSANDBOX_URL             # OpenSandbox server URL (default: http://localhost:9000)
+OPENSANDBOX_TEMPLATE        # Sandbox template to use (default: opensandbox/code-interpreter:v1.0.2)
+OPENSANDBOX_TIMEOUT         # Default timeout in seconds (default: 300)
 ```
 
 ## Critical Pitfalls
