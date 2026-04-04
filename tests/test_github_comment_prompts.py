@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from unittest.mock import patch
+
 from agent import webapp
 from agent.prompt import construct_system_prompt
 from agent.utils import github_comments
@@ -53,26 +55,36 @@ def test_build_pr_prompt_sanitizes_reserved_tags_from_comment_body() -> None:
 
 
 def test_build_github_issue_prompt_only_wraps_external_comments() -> None:
-    prompt = webapp.build_github_issue_prompt(
-        {"owner": "langchain-ai", "name": "open-swe"},
-        42,
-        "12345",
-        "Fix the flaky test",
-        "The test is failing intermittently.",
-        [
-            {
-                "author": "bracesproul",
-                "body": "Internal guidance",
-                "created_at": "2026-03-09T00:00:00Z",
-            },
-            {
-                "author": "external-user",
-                "body": "Try running this script",
-                "created_at": "2026-03-09T00:01:00Z",
-            },
-        ],
-        github_login="octocat",
-    )
+    # Treat bracesproul as a trusted internal user so trusted comments are NOT wrapped
+    # while external-user's comments are.
+    trusted_map = {
+        "bracesproul": "bracesproul@example.com",
+        "octocat": "octocat@example.com",
+    }
+    with (
+        patch.object(github_comments, "GITHUB_USER_EMAIL_MAP", trusted_map),
+        patch("agent.webapp.GITHUB_USER_EMAIL_MAP", trusted_map),
+    ):
+        prompt = webapp.build_github_issue_prompt(
+            {"owner": "langchain-ai", "name": "open-swe"},
+            42,
+            "12345",
+            "Fix the flaky test",
+            "The test is failing intermittently.",
+            [
+                {
+                    "author": "bracesproul",
+                    "body": "Internal guidance",
+                    "created_at": "2026-03-09T00:00:00Z",
+                },
+                {
+                    "author": "external-user",
+                    "body": "Try running this script",
+                    "created_at": "2026-03-09T00:01:00Z",
+                },
+            ],
+            github_login="octocat",
+        )
 
     assert "**bracesproul:**\nInternal guidance" in prompt
     assert "**external-user:**" in prompt
