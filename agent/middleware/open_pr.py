@@ -102,9 +102,7 @@ async def open_pr_if_needed(
 
         installation_token = await get_github_app_installation_token()
         if not installation_token:
-            logger.error(
-                "Failed to get GitHub App installation token for thread %s", thread_id
-            )
+            logger.error("Failed to get GitHub App installation token for thread %s", thread_id)
             return None
 
         if not thread_id:
@@ -138,9 +136,7 @@ async def open_pr_if_needed(
 
         metadata = config.get("metadata", {})
         branch_name = metadata.get("branch_name")
-        current_branch = await asyncio.to_thread(
-            git_current_branch, sandbox_backend, repo_dir
-        )
+        current_branch = await asyncio.to_thread(git_current_branch, sandbox_backend, repo_dir)
         target_branch = branch_name if branch_name else f"open-swe/{thread_id}"
 
         if current_branch != target_branch:
@@ -171,7 +167,7 @@ async def open_pr_if_needed(
             git_push, sandbox_backend, repo_dir, target_branch, installation_token
         )
 
-        base_branch = await get_github_default_branch(
+        base_branch = metadata.get("base_branch") or await get_github_default_branch(
             repo_owner, repo_name, installation_token
         )
         logger.info("Using base branch: %s", base_branch)

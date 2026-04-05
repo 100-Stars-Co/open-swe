@@ -37,6 +37,7 @@ from .integrations.langfuse_tracing import get_langfuse_callback_handler
 from .middleware import (
     ToolErrorMiddleware,
     check_message_queue_before_model,
+    cleanup_sandbox_after_task,
     ensure_no_empty_msg,
     open_pr_if_needed,
 )
@@ -517,6 +518,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             check_message_queue_before_model,
             ensure_no_empty_msg,
             open_pr_if_needed,
+            cleanup_sandbox_after_task,
         ],
     )
 

@@ -169,6 +169,10 @@ JIRA_BASE_URL / JIRA_API_TOKEN / JIRA_USER_EMAIL / JIRA_WEBHOOK_SECRET
 SANDBOX_TYPE                # "langsmith" | "daytona" | "runloop" | "modal" | "local" | "e2b" | "opensandbox"
 TOKEN_ENCRYPTION_KEY        # Base64 32-byte Fernet key
 
+# Daytona
+DAYTONA_API_KEY             # API key for Daytona
+DAYTONA_API_URL             # Daytona server URL (default: https://app.daytona.io/api)
+
 # OpenSandbox (self-hosted option - https://github.com/alibaba/OpenSandbox)
 OPENSANDBOX_URL             # OpenSandbox server URL (default: http://localhost:9000)
 OPENSANDBOX_TEMPLATE        # Sandbox template to use (default: opensandbox/code-interpreter:v1.0.2)

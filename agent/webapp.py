@@ -18,6 +18,7 @@ from .utils.auth import (
     persist_encrypted_github_token,
 )
 from .utils.comments import get_recent_comments
+from .utils.extract import extract_base_branch_with_llm
 from .utils.github_app import get_github_app_installation_token
 from .utils.github_comments import (
     OPEN_SWE_TAGS,
@@ -1258,11 +1259,20 @@ async def process_github_pr_comment(payload: dict[str, Any], event_type: str) ->
     ) = await extract_pr_context(payload, event_type)
     github_user_id = payload.get("sender", {}).get("id")
 
+    # Extract base_branch from comment body using LLM if user specified one
+    comment_body = payload.get("comment", {}).get("body", "")
+    if comment_body:
+        llm_base_branch = await extract_base_branch_with_llm(comment_body)
+        if llm_base_branch:
+            logger.info("LLM extracted base_branch from comment: %s", llm_base_branch)
+            base_branch = llm_base_branch
+
     logger.info(
-        "Processing GitHub PR comment: event=%s, pr=%s, branch=%s",
+        "Processing GitHub PR comment: event=%s, pr=%s, branch=%s, base_branch=%s",
         event_type,
         pr_number,
         branch_name,
+        base_branch,
     )
 
     thread_id = get_thread_id_from_branch(branch_name) if branch_name else None
@@ -1623,6 +1633,13 @@ async def process_jira_issue(  # noqa: PLR0912, PLR0915
     comments_text = ""
     triggering_comment = issue_data.get("comment_body", "")
 
+    # Extract base_branch from comment using LLM
+    base_branch = None
+    if triggering_comment:
+        base_branch = await extract_base_branch_with_llm(triggering_comment)
+        if base_branch:
+            logger.info("LLM extracted base_branch from Jira comment: %s", base_branch)
+
     bot_message_prefixes = (
         "🔐 **GitHub Authentication Required**",
         "✅ **Pull Request Created**",
@@ -1698,6 +1715,8 @@ async def process_jira_issue(  # noqa: PLR0912, PLR0915
         "user_email": user_email,
         "source": "jira",
     }
+    if base_branch:
+        configurable["base_branch"] = base_branch
 
     logger.info("Checking if thread %s is active before creating run", thread_id)
     thread_active = await is_thread_active(thread_id)
@@ -1725,6 +1744,16 @@ async def process_jira_issue(  # noqa: PLR0912, PLR0915
     else:
         logger.info("Creating LangGraph run for thread %s", thread_id)
         langgraph_client = get_client(url=LANGGRAPH_URL)
+
+        # Update thread metadata with base_branch if available
+        if base_branch:
+            try:
+                await langgraph_client.threads.update(
+                    thread_id, metadata={"base_branch": base_branch}
+                )
+            except Exception:
+                logger.warning("Failed to update base_branch metadata for thread %s", thread_id)
+
         run = await langgraph_client.runs.create(
             thread_id,
             "agent",

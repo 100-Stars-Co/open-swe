@@ -13,6 +13,39 @@ from agent.utils import jira_webhook
 _TEST_WEBHOOK_SECRET = "test-secret-for-jira-webhook"
 
 
+def _patch_external_calls(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Patch all external network calls in process_jira_issue."""
+
+    class _MockRuns:
+        async def create(self, *args: Any, **kwargs: Any) -> dict[str, Any]:
+            return {"run_id": "mock-run-id"}
+
+    class _MockThreads:
+        async def update(self, *args: Any, **kwargs: Any) -> None:
+            pass
+
+    class _MockClient:
+        runs = _MockRuns()
+        threads = _MockThreads()
+
+    async def _mock_is_thread_active(thread_id: str) -> bool:
+        return False
+
+    async def _mock_jira_get_issue(issue_key: str) -> dict[str, Any]:
+        return {
+            "issue": {
+                "key": issue_key,
+                "self": "https://mock.atlassian.net/rest/api/3/issue/1",
+                "fields": {"summary": "Mock summary", "description": "Mock description"},
+            }
+        }
+
+    monkeypatch.setattr(webapp, "is_thread_active", _mock_is_thread_active)
+    monkeypatch.setattr(webapp, "jira_get_issue", _mock_jira_get_issue)
+    monkeypatch.setattr(webapp, "get_trace_url", lambda run_id: None)
+    monkeypatch.setattr(webapp, "get_client", lambda **kw: _MockClient())
+
+
 class TestJiraWebhookVerification:
     """Test webhook secret verification."""
 
@@ -163,10 +196,14 @@ class TestJiraWebhookEndpoint:
     @pytest.fixture
     def client(self, monkeypatch: pytest.MonkeyPatch) -> TestClient:
         monkeypatch.setattr(webapp, "JIRA_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+        _patch_external_calls(monkeypatch)
         return TestClient(webapp.app)
 
     def _post_jira_webhook(
-        self, client: TestClient, payload: dict[str, Any], secret: str = _TEST_WEBHOOK_SECRET
+        self,
+        client: TestClient,
+        payload: dict[str, Any],
+        secret: str = _TEST_WEBHOOK_SECRET,
     ) -> Any:
         """Send a Jira webhook POST request."""
         return client.post(
@@ -322,7 +359,10 @@ class TestProcessJiraIssue:
                 "issue": {
                     "key": issue_key,
                     "self": "https://mycompany.atlassian.net/rest/api/3/issue/10001",
-                    "fields": {"summary": "Login page crashes on Safari", "description": ""},
+                    "fields": {
+                        "summary": "Login page crashes on Safari",
+                        "description": "",
+                    },
                 }
             }
 
@@ -428,8 +468,15 @@ class TestProcessJiraIssue:
                         "type": "paragraph",
                         "content": [
                             {"type": "text", "text": "When a user clicks "},
-                            {"type": "text", "text": "Submit", "marks": [{"type": "strong"}]},
-                            {"type": "text", "text": ", the page redirects to a 500 error."},
+                            {
+                                "type": "text",
+                                "text": "Submit",
+                                "marks": [{"type": "strong"}],
+                            },
+                            {
+                                "type": "text",
+                                "text": ", the page redirects to a 500 error.",
+                            },
                         ],
                     },
                     {
@@ -441,7 +488,10 @@ class TestProcessJiraIssue:
                                     {
                                         "type": "paragraph",
                                         "content": [
-                                            {"type": "text", "text": "Steps to reproduce:"}
+                                            {
+                                                "type": "text",
+                                                "text": "Steps to reproduce:",
+                                            }
                                         ],
                                     }
                                 ],
@@ -516,7 +566,10 @@ class TestProcessJiraIssue:
                 "issue": {
                     "key": issue_key,
                     "self": "https://mycompany.atlassian.net/rest/api/3/issue/30001",
-                    "fields": {"summary": "Disk usage alert", "description": "Server at 95%."},
+                    "fields": {
+                        "summary": "Disk usage alert",
+                        "description": "Server at 95%.",
+                    },
                 }
             }
 
@@ -636,7 +689,10 @@ class TestExtractTextFromADF:
                     "type": "paragraph",
                     "content": [
                         {"type": "text", "text": "See "},
-                        {"type": "mention", "attrs": {"id": "user123", "text": "@alice"}},
+                        {
+                            "type": "mention",
+                            "attrs": {"id": "user123", "text": "@alice"},
+                        },
                         {"type": "text", "text": " for details."},
                     ],
                 }
@@ -655,6 +711,7 @@ class TestJiraWebhookOrgAllowlist:
         monkeypatch.setattr(webapp, "JIRA_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
         # Only "allowedorg" is permitted
         monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset(["allowedorg"]))
+        _patch_external_calls(monkeypatch)
         return TestClient(webapp.app)
 
     def test_allowed_org_is_accepted(self, client_with_allowlist: TestClient) -> None:
@@ -696,6 +753,7 @@ class TestJiraWebhookOrgAllowlist:
         monkeypatch.setattr(webapp, "ALLOWED_GITHUB_ORGS", frozenset())  # No restriction
         monkeypatch.setattr(webapp, "DEFAULT_REPO_OWNER", "defaultowner")
         monkeypatch.setattr(webapp, "DEFAULT_REPO_NAME", "defaultrepo")
+        _patch_external_calls(monkeypatch)
 
         client = TestClient(webapp.app)
         payload = {

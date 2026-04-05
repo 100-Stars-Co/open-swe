@@ -174,9 +174,7 @@ def commit_and_open_pr(
         if current_branch != target_branch:
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
-                result = git_checkout_existing_branch(
-                    sandbox_backend, repo_dir, target_branch
-                )
+                result = git_checkout_existing_branch(sandbox_backend, repo_dir, target_branch)
                 if result.exit_code != 0:
                     return {
                         "success": False,
@@ -208,9 +206,7 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        push_result = git_push(
-            sandbox_backend, repo_dir, target_branch, installation_token
-        )
+        push_result = git_push(sandbox_backend, repo_dir, target_branch, installation_token)
         if push_result.exit_code != 0:
             return {
                 "success": False,
@@ -218,7 +214,7 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        base_branch = asyncio.run(
+        base_branch = metadata.get("base_branch") or asyncio.run(
             get_github_default_branch(repo_owner, repo_name, installation_token)
         )
         pr_url, _pr_number, pr_existing = asyncio.run(
