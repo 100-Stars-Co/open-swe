@@ -314,9 +314,31 @@ def create_opensandbox_sandbox(
 
     create_kwargs: dict[str, Any] | None = None
     if not sandbox_id:
+        from opensandbox.models.sandboxes import NetworkPolicy
+
+        # By default, do NOT attach the egress sidecar (network_policy=None).
+        # Without a sidecar the sandbox uses plain Docker bridge networking, which
+        # provides full outbound internet access via Docker's built-in NAT — this
+        # is required for the agent to browse the web, install packages, and use
+        # Playwright.  The egress sidecar intercepts DNS via iptables and can break
+        # browser/playwright connections even in allow-all mode.
+        #
+        # Set OPENSANDBOX_DENY_EGRESS=true to attach the sidecar with a deny-all
+        # egress policy (requires [egress] image to be configured in ~/.sandbox.toml
+        # and docker.network_mode = "bridge").
+        deny_egress = os.environ.get("OPENSANDBOX_DENY_EGRESS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        network_policy: NetworkPolicy | None = (
+            NetworkPolicy(default_action="deny") if deny_egress else None
+        )
+
         create_kwargs = {
             "image": template,
             "timeout": timedelta(seconds=resolved_timeout),
+            "network_policy": network_policy,
         }
         if envs:
             create_kwargs["env"] = envs

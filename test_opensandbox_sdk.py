@@ -15,7 +15,9 @@ warnings.filterwarnings("ignore", message="langsmith.sandbox is in alpha", categ
 
 # Default OpenSandbox settings
 DEFAULT_OPENSANDBOX_URL = "http://127.0.0.1:9000"
-DEFAULT_OPENSANDBOX_TEMPLATE = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+DEFAULT_OPENSANDBOX_TEMPLATE = (
+    "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+)
 
 
 def get_opensandbox_url() -> str:
@@ -38,6 +40,7 @@ async def run_tests() -> int:
     try:
         from opensandbox import Sandbox
         from opensandbox.config import ConnectionConfig
+
         print("✓ OpenSandbox SDK imported successfully")
     except ImportError as exc:
         print(f"❌ Failed to import OpenSandbox SDK: {exc}")
@@ -53,6 +56,7 @@ async def run_tests() -> int:
     # SDK uses OPEN_SANDBOX_DOMAIN env var, not server_url parameter
     # Extract domain from URL (e.g., "http://127.0.0.1:9000" -> "127.0.0.1:9000")
     from urllib.parse import urlparse
+
     parsed = urlparse(server_url)
     domain = parsed.netloc or server_url.replace("http://", "").replace("https://", "")
     os.environ["OPEN_SANDBOX_DOMAIN"] = domain
@@ -79,16 +83,16 @@ async def run_tests() -> int:
         # Helper to extract output from Execution result
         def get_output(result):
             """Extract stdout text from Execution result."""
-            if hasattr(result, 'logs') and result.logs:
-                stdout_msgs = result.logs.stdout if hasattr(result.logs, 'stdout') else []
-                return "".join(m.text for m in stdout_msgs if hasattr(m, 'text'))
+            if hasattr(result, "logs") and result.logs:
+                stdout_msgs = result.logs.stdout if hasattr(result.logs, "stdout") else []
+                return "".join(m.text for m in stdout_msgs if hasattr(m, "text"))
             return ""
 
         def get_stderr(result):
             """Extract stderr text from Execution result."""
-            if hasattr(result, 'logs') and result.logs:
-                stderr_msgs = result.logs.stderr if hasattr(result.logs, 'stderr') else []
-                return "".join(m.text for m in stderr_msgs if hasattr(m, 'text'))
+            if hasattr(result, "logs") and result.logs:
+                stderr_msgs = result.logs.stderr if hasattr(result.logs, "stderr") else []
+                return "".join(m.text for m in stderr_msgs if hasattr(m, "text"))
             return ""
 
         # Test 2: Execute command
@@ -96,7 +100,7 @@ async def run_tests() -> int:
         result = await sandbox.commands.run("echo 'Hello from OpenSandbox!'")
         output = get_output(result)
         if "Hello from OpenSandbox" in output:
-            print(f"✓ Command executed successfully")
+            print("✓ Command executed successfully")
             print(f"   Output: {output.strip()}")
         else:
             print(f"❌ Command failed or unexpected output: {output!r}")
@@ -108,21 +112,20 @@ async def run_tests() -> int:
         stderr = get_stderr(result)
         stdout = get_output(result)
         if "error message" in stderr or "error message" in stdout:
-            print(f"✓ Stderr captured successfully")
+            print("✓ Stderr captured successfully")
             print(f"   stderr: {stderr.strip()!r}")
             print(f"   stdout: {stdout.strip()!r}")
         else:
-            print(f"⚠ Stderr capture might not work")
+            print("⚠ Stderr capture might not work")
             print(f"   stderr: {stderr!r}")
             print(f"   stdout: {stdout!r}")
 
         # Test 4: Write file
         print("\n📝 Test 4: Writing file...")
         from opensandbox.models import WriteEntry
+
         entry = WriteEntry(
-            path="/tmp/test_opensandbox.txt",
-            data=b"Hello World from OpenSandbox!",
-            mode=644
+            path="/tmp/test_opensandbox.txt", data=b"Hello World from OpenSandbox!", mode=644
         )
         await sandbox.files.write_files([entry])
         print("✓ File written successfully")
@@ -132,11 +135,11 @@ async def run_tests() -> int:
         content = await sandbox.files.read_file("/tmp/test_opensandbox.txt")
         # Content may be bytes or string depending on SDK version
         if isinstance(content, bytes):
-            content_str = content.decode('utf-8')
+            content_str = content.decode("utf-8")
         else:
             content_str = content
         if "Hello World from OpenSandbox" in content_str:
-            print(f"✓ File read successfully")
+            print("✓ File read successfully")
             print(f"   Content: {content_str.strip()}")
         else:
             print(f"❌ File content mismatch: {content!r}")
@@ -162,6 +165,7 @@ async def run_tests() -> int:
     except Exception as e:
         print(f"\n❌ Error during testing: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

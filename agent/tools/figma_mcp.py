@@ -1,46 +1,49 @@
 """Figma MCP tools for accessing Figma design files.
 
 This module provides tools to interact with Figma design files via the
-Model Context Protocol (MCP). The Figma MCP server runs as a subprocess
-and provides tools for extracting layout and styling information.
+Framelink MCP server (https://github.com/GLips/Figma-Context-MCP).
+Uses the `figma-developer-mcp` npm package launched via stdio transport,
+so no persistent HTTP connection is required.
+
+Set FIGMA_API_KEY to a Figma Personal Access Token to enable the tools.
 """
 
+import os
 from typing import Any
 
 from langchain_mcp_adapters.client import MultiServerMCPClient
 
-# Global client instance for caching
-_figma_client: MultiServerMCPClient | None = None
+
+def _unwrap_exception(e: Exception) -> str:
+    """Extract a readable message from a plain or grouped exception."""
+    if isinstance(e, BaseExceptionGroup):
+        return "; ".join(str(sub) for sub in e.exceptions)
+    return str(e)
 
 
-async def _get_figma_client() -> MultiServerMCPClient:
-    """Get or create the Figma MCP client.
-
-    Returns:
-        Configured MultiServerMCPClient instance for Figma
-    """
-    global _figma_client
-
-    if _figma_client is not None:
-        return _figma_client
-
-    import os
-
-    figma_api_key = os.environ.get("FIGMA_API_KEY")
-
-    # Initialize the MCP client with Figma server configuration
-    _figma_client = MultiServerMCPClient(
+def _make_client() -> MultiServerMCPClient:
+    """Create a MultiServerMCPClient that spawns figma-developer-mcp via stdio."""
+    figma_api_key = os.environ.get("FIGMA_API_KEY", "")
+    return MultiServerMCPClient(
         {
             "figma": {
+                "transport": "stdio",
                 "command": "npx",
-                "args": ["-y", "figma-developer-mcp", "--stdio"],
-                "env": {"FIGMA_API_KEY": figma_api_key} if figma_api_key else {},
+                "args": [
+                    "-y",
+                    "figma-developer-mcp",
+                    f"--figma-api-key={figma_api_key}",
+                    "--stdio",
+                ],
             }
         }
     )
 
-    await _figma_client.__aenter__()
-    return _figma_client
+
+async def _get_tool(tool_name: str) -> Any | None:
+    """Spawn the figma-developer-mcp process and return the named tool."""
+    tools = await _make_client().get_tools()
+    return next((t for t in tools if t.name == tool_name), None)
 
 
 async def figma_get_file(
@@ -50,156 +53,134 @@ async def figma_get_file(
 ) -> dict[str, Any]:
     """Get a Figma file's layout and styling information.
 
-    This tool retrieves design information from a Figma file, including
-    layout structure, colors, typography, and component details. The response
-    is simplified to provide only the most relevant information for implementation.
+    Retrieves design information from a Figma file, including layout structure,
+    colors, typography, and component details. The response is simplified by
+    figma-developer-mcp to include only the most relevant information.
 
     Args:
-        file_key: The Figma file key (from the URL, e.g., "ABC123" in
-            figma.com/file/ABC123/file-name)
-        node_id: Optional specific node ID to fetch (for targeting a specific
-            component or frame)
-        depth: Optional depth level for fetching nested elements (use to limit
-            response size for large files)
+        file_key: The Figma file key (from the URL, e.g. "ABC123" in
+            figma.com/file/ABC123/file-name). Also accepts a full Figma URL.
+        node_id: Optional node ID to scope the fetch to a specific frame or
+            component (e.g. "1:23").
+        depth: Optional depth limit for nested elements (reduces response size
+            for large files).
 
     Returns:
-        Dictionary containing:
+        Dictionary with keys:
         - success: Whether the request succeeded
-        - document: The file's document structure with layout and styling info
+        - document: Simplified layout and styling data
         - error: Error message if the request failed
-
-    Example:
-        file_key = "ABC123xyz"  # From figma.com/file/ABC123xyz/my-design
-        result = figma_get_file(file_key)
     """
     try:
-        client = await _get_figma_client()
-        tools = await client.get_tools()
+        tool = await _get_tool("get_figma_data")
+        if not tool:
+            return {
+                "error": "get_figma_data tool not available from figma-developer-mcp",
+                "success": False,
+            }
 
-        # Find the get_file tool
-        get_file_tool = None
-        for tool in tools:
-            if hasattr(tool, "name") and tool.name == "get_file":
-                get_file_tool = tool
-                break
-
-        if not get_file_tool:
-            return {"error": "Figma get_file tool not available"}
-
-        # Build arguments
         args: dict[str, Any] = {"fileKey": file_key}
         if node_id:
             args["nodeId"] = node_id
         if depth is not None:
             args["depth"] = depth
 
-        # Invoke the tool
-        result = await get_file_tool.ainvoke(args)
+        result = await tool.ainvoke(args)
         return {"success": True, "document": result}
 
     except Exception as e:
-        return {"error": f"Failed to get Figma file: {e!s}", "success": False}
+        return {
+            "error": f"Failed to get Figma file: {_unwrap_exception(e)}",
+            "success": False,
+        }
 
 
 async def figma_get_component(
     file_key: str,
     component_id: str,
 ) -> dict[str, Any]:
-    """Get detailed information about a specific Figma component.
+    """Get detailed information about a specific Figma component or frame.
 
-    This tool retrieves component-specific information including its
-    properties, variants, and styling details.
+    Uses the node ID to scope the Figma data fetch to a single component,
+    returning its layout, styling, and variant information.
 
     Args:
-        file_key: The Figma file key containing the component
-        component_id: The unique identifier of the component
+        file_key: The Figma file key containing the component.
+        component_id: The node ID of the component (e.g. "1:23").
 
     Returns:
-        Dictionary containing:
+        Dictionary with keys:
         - success: Whether the request succeeded
-        - component: Component details including properties and styles
+        - component: Component layout and styling data
         - error: Error message if the request failed
     """
     try:
-        client = await _get_figma_client()
-        tools = await client.get_tools()
+        tool = await _get_tool("get_figma_data")
+        if not tool:
+            return {
+                "error": "get_figma_data tool not available from figma-developer-mcp",
+                "success": False,
+            }
 
-        # Find the get_component tool
-        get_component_tool = None
-        for tool in tools:
-            if hasattr(tool, "name") and tool.name == "get_component":
-                get_component_tool = tool
-                break
-
-        if not get_component_tool:
-            return {"error": "Figma get_component tool not available"}
-
-        result = await get_component_tool.ainvoke(
-            {"fileKey": file_key, "componentId": component_id}
-        )
+        result = await tool.ainvoke({"fileKey": file_key, "nodeId": component_id})
         return {"success": True, "component": result}
 
     except Exception as e:
-        return {"error": f"Failed to get Figma component: {e!s}", "success": False}
+        return {
+            "error": f"Failed to get Figma component: {_unwrap_exception(e)}",
+            "success": False,
+        }
 
 
 async def figma_export_image(
     file_key: str,
     node_id: str,
-    format: str = "png",
-    scale: float = 1.0,
+    local_path: str = "/tmp/figma_images",
+    file_name: str = "export.png",
 ) -> dict[str, Any]:
-    """Export an image from a Figma file.
+    """Download a Figma node (frame, component, or icon) as an image file.
 
-    This tool exports a specific node (frame, component, or layer) as an image.
+    Downloads the specified node as SVG or PNG into a local directory inside
+    the sandbox. Use the file path returned to reference the asset in code.
 
     Args:
-        file_key: The Figma file key
-        node_id: The specific node ID to export
-        format: Image format (png, svg, pdf, jpg) - default: png
-        scale: Export scale factor - default: 1.0 (use 2.0 for retina)
+        file_key: The Figma file key.
+        node_id: The node ID to export (e.g. "1:23").
+        local_path: Sandbox directory to write the image into (default:
+            /tmp/figma_images). The directory must be writable.
+        file_name: Output file name including extension, e.g. "button.svg"
+            or "hero.png" (default: export.png).
 
     Returns:
-        Dictionary containing:
+        Dictionary with keys:
         - success: Whether the export succeeded
-        - url: Temporary URL to the exported image
+        - result: Server response confirming the downloaded file path
         - error: Error message if the export failed
     """
     try:
-        client = await _get_figma_client()
-        tools = await client.get_tools()
+        tool = await _get_tool("download_figma_images")
+        if not tool:
+            return {
+                "error": "download_figma_images tool not available from figma-developer-mcp",
+                "success": False,
+            }
 
-        # Find the export_image tool
-        export_tool = None
-        for tool in tools:
-            if hasattr(tool, "name") and tool.name == "export_image":
-                export_tool = tool
-                break
-
-        if not export_tool:
-            return {"error": "Figma export_image tool not available"}
-
-        result = await export_tool.ainvoke(
+        result = await tool.ainvoke(
             {
                 "fileKey": file_key,
-                "nodeId": node_id,
-                "format": format,
-                "scale": scale,
+                "nodes": [{"nodeId": node_id, "fileName": file_name}],
+                "localPath": local_path,
             }
         )
-        return {"success": True, "url": result}
+        return {"success": True, "result": result}
 
     except Exception as e:
-        return {"error": f"Failed to export image: {e!s}", "success": False}
+        return {
+            "error": f"Failed to export image: {_unwrap_exception(e)}",
+            "success": False,
+        }
 
 
 async def close_figma_client() -> None:
-    """Close the Figma MCP client connection.
-
-    This should be called when done using Figma tools to clean up resources.
-    """
-    global _figma_client
-
-    if _figma_client is not None:
-        await _figma_client.__aexit__(None, None, None)
-        _figma_client = None
+    """No-op: stdio transport uses ephemeral per-call processes; nothing to close."""
+    pass

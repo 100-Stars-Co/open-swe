@@ -4,11 +4,19 @@ from typing import Any
 
 from langgraph.config import get_config
 
+from ..utils.authorship import (
+    OPEN_SWE_BOT_EMAIL,
+    OPEN_SWE_BOT_NAME,
+    add_pr_collaboration_note,
+    add_user_coauthor_trailer,
+    resolve_triggering_user_identity,
+)
 from ..utils.github import (
     create_github_pr,
     get_github_default_branch,
     git_add_all,
     git_checkout_branch,
+    git_checkout_existing_branch,
     git_commit,
     git_config_user,
     git_current_branch,
@@ -17,6 +25,7 @@ from ..utils.github import (
     git_has_unpushed_commits,
     git_push,
 )
+from ..utils.github_app import get_github_app_installation_token
 from ..utils.github_token import get_github_token
 from ..utils.sandbox_paths import resolve_repo_dir
 from ..utils.sandbox_state import get_sandbox_backend_sync
@@ -114,7 +123,11 @@ def commit_and_open_pr(
         thread_id = configurable.get("thread_id")
 
         if not thread_id:
-            return {"success": False, "error": "Missing thread_id in config", "pr_url": None}
+            return {
+                "success": False,
+                "error": "Missing thread_id in config",
+                "pr_url": None,
+            }
 
         repo_config = configurable.get("repo", {})
         repo_owner = repo_config.get("owner")
@@ -128,9 +141,16 @@ def commit_and_open_pr(
 
         sandbox_backend = get_sandbox_backend_sync(thread_id)
         if not sandbox_backend:
-            return {"success": False, "error": "No sandbox found for thread", "pr_url": None}
+            return {
+                "success": False,
+                "error": "No sandbox found for thread",
+                "pr_url": None,
+            }
 
         repo_dir = resolve_repo_dir(sandbox_backend, repo_name)
+        github_token = get_github_token()
+        user_identity = resolve_triggering_user_identity(config, github_token)
+        pr_body = add_pr_collaboration_note(body, user_identity)
 
         has_uncommitted_changes = git_has_uncommitted_changes(sandbox_backend, repo_dir)
         git_fetch_origin(sandbox_backend, repo_dir)
@@ -139,6 +159,14 @@ def commit_and_open_pr(
         if not (has_uncommitted_changes or has_unpushed_commits):
             return {"success": False, "error": "No changes detected", "pr_url": None}
 
+        installation_token = asyncio.run(get_github_app_installation_token())
+        if not installation_token:
+            return {
+                "success": False,
+                "error": "Failed to get GitHub App installation token",
+                "pr_url": None,
+            }
+
         metadata = config.get("metadata", {})
         branch_name = metadata.get("branch_name")
         current_branch = git_current_branch(sandbox_backend, repo_dir)
@@ -146,7 +174,7 @@ def commit_and_open_pr(
         if current_branch != target_branch:
             if branch_name:
                 # Existing branch — plain checkout, do not create or reset
-                result = sandbox_backend.execute(f"cd {repo_dir} && git checkout {target_branch}")
+                result = git_checkout_existing_branch(sandbox_backend, repo_dir, target_branch)
                 if result.exit_code != 0:
                     return {
                         "success": False,
@@ -163,12 +191,12 @@ def commit_and_open_pr(
         git_config_user(
             sandbox_backend,
             repo_dir,
-            "open-swe[bot]",
-            "open-swe@users.noreply.github.com",
+            OPEN_SWE_BOT_NAME,
+            OPEN_SWE_BOT_EMAIL,
         )
         git_add_all(sandbox_backend, repo_dir)
 
-        commit_msg = commit_message or title
+        commit_msg = add_user_coauthor_trailer(commit_message or title, user_identity)
         if has_uncommitted_changes:
             commit_result = git_commit(sandbox_backend, repo_dir, commit_msg)
             if commit_result.exit_code != 0:
@@ -178,16 +206,7 @@ def commit_and_open_pr(
                     "pr_url": None,
                 }
 
-        github_token = get_github_token()
-        if not github_token:
-            logger.error("commit_and_open_pr missing GitHub token for thread %s", thread_id)
-            return {
-                "success": False,
-                "error": "Missing GitHub token",
-                "pr_url": None,
-            }
-
-        push_result = git_push(sandbox_backend, repo_dir, target_branch, github_token)
+        push_result = git_push(sandbox_backend, repo_dir, target_branch, installation_token)
         if push_result.exit_code != 0:
             return {
                 "success": False,
@@ -195,21 +214,18 @@ def commit_and_open_pr(
                 "pr_url": None,
             }
 
-        # Get base branch from metadata (PR webhook context) or configurable, fallback to default
-        base_branch = metadata.get("base_branch") or configurable.get("base_branch", "")
-        if not base_branch:
-            base_branch = asyncio.run(
-                get_github_default_branch(repo_owner, repo_name, github_token)
-            )
+        base_branch = metadata.get("base_branch") or asyncio.run(
+            get_github_default_branch(repo_owner, repo_name, installation_token)
+        )
         pr_url, _pr_number, pr_existing = asyncio.run(
             create_github_pr(
                 repo_owner=repo_owner,
                 repo_name=repo_name,
-                github_token=github_token,
+                github_token=installation_token,
                 title=title,
                 head_branch=target_branch,
                 base_branch=base_branch,
-                body=body,
+                body=pr_body,
             )
         )
 

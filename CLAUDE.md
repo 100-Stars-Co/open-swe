@@ -38,7 +38,7 @@ make format-check     # ruff format --check (CI-friendly)
 | File              | Role                                                                               |
 | ----------------- | ---------------------------------------------------------------------------------- |
 | `agent/server.py` | `get_agent()` — builds the LangGraph agent; called by LangGraph runtime            |
-| `agent/webapp.py` | FastAPI app with webhook handlers: `POST /slack`, `POST /linear`, `POST /github`   |
+| `agent/webapp.py` | FastAPI app with webhook handlers: `POST /slack`, `POST /linear`, `POST /github`, `POST /jira`   |
 | `agent/prompt.py` | `construct_system_prompt()` — assembles system prompt from structured sections      |
 
 ### Directory Structure
@@ -55,13 +55,13 @@ agent/
                      #   ensure_no_empty_msg, open_pr_if_needed
   integrations/      # Sandbox provider factories: langsmith, daytona, runloop, modal, local, e2b, opensandbox
   utils/             # Shared helpers: auth, github, slack, linear, sandbox, model, multimodal
-  skills/            # Skill definitions (e.g., playwright_cli.md)
+  skills/            # Skill definitions - each skill is a directory with SKILL.md (e.g., skills/playwright-cli/SKILL.md)
 ```
 
 ### Agent Execution Flow
 
 ```
-Webhook (Slack/Linear/GitHub)
+Webhook (Slack/Linear/GitHub/Jira)
   → webapp.py verifies signature, extracts context
   → create/reconnect sandbox (thread-persistent)
   → clone/pull repo, read CLAUDE.md (or AGENTS.md) from repo root
@@ -163,15 +163,21 @@ LANGSMITH_TENANT_ID_PROD
 # Optional integrations
 LINEAR_API_KEY / LINEAR_WEBHOOK_SECRET
 SLACK_BOT_TOKEN / SLACK_SIGNING_SECRET
+JIRA_BASE_URL / JIRA_API_TOKEN / JIRA_USER_EMAIL / JIRA_WEBHOOK_SECRET
 
 # Sandbox
 SANDBOX_TYPE                # "langsmith" | "daytona" | "runloop" | "modal" | "local" | "e2b" | "opensandbox"
 TOKEN_ENCRYPTION_KEY        # Base64 32-byte Fernet key
 
+# Daytona
+DAYTONA_API_KEY             # API key for Daytona
+DAYTONA_API_URL             # Daytona server URL (default: https://app.daytona.io/api)
+
 # OpenSandbox (self-hosted option - https://github.com/alibaba/OpenSandbox)
 OPENSANDBOX_URL             # OpenSandbox server URL (default: http://localhost:9000)
 OPENSANDBOX_TEMPLATE        # Sandbox template to use (default: opensandbox/code-interpreter:v1.0.2)
 OPENSANDBOX_TIMEOUT         # Default timeout in seconds (default: 300)
+OPENSANDBOX_DENY_EGRESS     # Set to "true" to block all outbound sandbox traffic (default: allow all)
 ```
 
 ## Critical Pitfalls

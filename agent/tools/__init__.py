@@ -32,6 +32,7 @@ from .linear_get_issue_comments import linear_get_issue_comments
 from .linear_list_teams import linear_list_teams
 from .linear_update_issue import linear_update_issue
 from .slack_thread_reply import slack_thread_reply
+from .web_search import web_search
 
 __all__ = [
     "close_figma_client",
@@ -64,4 +65,5 @@ __all__ = [
     "slack_thread_reply",
     "submit_pr_review",
     "update_pr_review",
+    "web_search",
 ]

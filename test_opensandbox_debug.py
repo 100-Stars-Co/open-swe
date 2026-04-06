@@ -72,7 +72,9 @@ class OpenSandboxDiagnosticClient:
             sandbox = await self.get_sandbox(sandbox_id)
             status = sandbox.get("status")
             if isinstance(status, dict):
-                state = status.get("state", "").lower() if "state" in status else str(status).lower()
+                state = (
+                    status.get("state", "").lower() if "state" in status else str(status).lower()
+                )
             elif isinstance(status, str):
                 state = status.lower()
             else:
@@ -168,7 +170,9 @@ async def run_diagnostics(opensandbox_url: str) -> int:
     try:
         # Create sandbox
         print("\n📦 Creating sandbox...")
-        image = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+        image = (
+            "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
+        )
         result = await client.create_sandbox(
             image=image,
             timeout=300,
@@ -180,7 +184,7 @@ async def run_diagnostics(opensandbox_url: str) -> int:
         # Wait for sandbox
         print("\n⏳ Waiting for sandbox to be ready...")
         sandbox = await client.wait_for_sandbox(sandbox_id, timeout=60)
-        print(f"✓ Sandbox is running")
+        print("✓ Sandbox is running")
 
         # Get full sandbox info
         print("\n📋 Sandbox details:")
@@ -208,7 +212,7 @@ async def run_diagnostics(opensandbox_url: str) -> int:
             error = result.get("error")
 
             if exit_code == 0 and "Hello from OpenSandbox" in stdout:
-                print(f"✓ Command executed successfully")
+                print("✓ Command executed successfully")
                 print(f"   Output: {stdout.strip()}")
             else:
                 print(f"❌ Command failed with exit code {exit_code}")
@@ -230,6 +234,7 @@ async def run_diagnostics(opensandbox_url: str) -> int:
     except Exception as e:
         print(f"\n❌ Error during diagnostics: {e}")
         import traceback
+
         traceback.print_exc()
         return 1
 

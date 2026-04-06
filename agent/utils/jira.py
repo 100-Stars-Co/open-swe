@@ -135,7 +135,16 @@ async def search_issues(
         "jql": jql,
         "maxResults": max_results,
         "startAt": start_at,
-        "fields": ["summary", "status", "assignee", "created", "updated", "issuetype", "priority", "description"],
+        "fields": [
+            "summary",
+            "status",
+            "assignee",
+            "created",
+            "updated",
+            "issuetype",
+            "priority",
+            "description",
+        ],
     }
     result = await _api_request("POST", "/search/jql", json_data=json_data)
     if "error" in result:

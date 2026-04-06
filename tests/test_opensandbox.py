@@ -144,9 +144,7 @@ class TestOpenSandboxBackendUnit:
 
     def _make_backend(self, mock_sandbox: MagicMock) -> OpenSandboxBackend:
         """Create a backend with a pre-configured mock sandbox."""
-        with patch.object(
-            OpenSandboxBackend, "_init_sandbox", new_callable=AsyncMock
-        ) as mock_init:
+        with patch.object(OpenSandboxBackend, "_init_sandbox", new_callable=AsyncMock) as mock_init:
             mock_init.return_value = mock_sandbox
             backend = OpenSandboxBackend(
                 sandbox_id="test-sandbox-id",
@@ -240,9 +238,7 @@ class TestOpenSandboxBackendUnit:
     async def test_write_file_failure(self) -> None:
         """Test file write failure."""
         mock_sandbox = MagicMock()
-        mock_sandbox.files.write_files = AsyncMock(
-            side_effect=Exception("Write failed")
-        )
+        mock_sandbox.files.write_files = AsyncMock(side_effect=Exception("Write failed"))
 
         backend = self._make_backend(mock_sandbox)
         result = backend.write("/tmp/test.txt", "content")
@@ -295,9 +291,7 @@ class TestOpenSandboxBackendUnit:
     async def test_upload_files_failure(self) -> None:
         """Test file upload failure."""
         mock_sandbox = MagicMock()
-        mock_sandbox.files.write_files = AsyncMock(
-            side_effect=Exception("Upload failed")
-        )
+        mock_sandbox.files.write_files = AsyncMock(side_effect=Exception("Upload failed"))
 
         backend = self._make_backend(mock_sandbox)
         responses = backend.upload_files([("/tmp/file.txt", b"content")])
@@ -351,13 +345,10 @@ class TestOpenSandboxIntegration:
                 return False
 
     @pytest.mark.skipif(
-        not os.environ.get("OPENSANDBOX_URL")
-        and not os.environ.get("RUN_INTEGRATION_TESTS"),
+        not os.environ.get("OPENSANDBOX_URL") and not os.environ.get("RUN_INTEGRATION_TESTS"),
         reason="OpenSandbox integration test skipped. Set OPENSANDBOX_URL or RUN_INTEGRATION_TESTS to run.",
     )
-    def test_create_sandbox_and_execute_command(
-        self, is_opensandbox_available: bool
-    ) -> None:
+    def test_create_sandbox_and_execute_command(self, is_opensandbox_available: bool) -> None:
         """Test creating a sandbox and executing a command."""
         if not is_opensandbox_available:
             pytest.skip("OpenSandbox is not available at the configured URL")
@@ -396,8 +387,7 @@ class TestOpenSandboxIntegration:
                 print(f"Warning: Failed to cleanup sandbox: {e}")
 
     @pytest.mark.skipif(
-        not os.environ.get("OPENSANDBOX_URL")
-        and not os.environ.get("RUN_INTEGRATION_TESTS"),
+        not os.environ.get("OPENSANDBOX_URL") and not os.environ.get("RUN_INTEGRATION_TESTS"),
         reason="OpenSandbox integration test skipped. Set OPENSANDBOX_URL or RUN_INTEGRATION_TESTS to run.",
     )
     def test_write_and_read_file(self, is_opensandbox_available: bool) -> None:
@@ -455,13 +445,10 @@ class TestOpenSandboxIntegration:
                 print(f"Warning: Failed to cleanup sandbox: {e}")
 
     @pytest.mark.skipif(
-        not os.environ.get("OPENSANDBOX_URL")
-        and not os.environ.get("RUN_INTEGRATION_TESTS"),
+        not os.environ.get("OPENSANDBOX_URL") and not os.environ.get("RUN_INTEGRATION_TESTS"),
         reason="OpenSandbox integration test skipped. Set OPENSANDBOX_URL or RUN_INTEGRATION_TESTS to run.",
     )
-    def test_reconnect_to_existing_sandbox(
-        self, is_opensandbox_available: bool
-    ) -> None:
+    def test_reconnect_to_existing_sandbox(self, is_opensandbox_available: bool) -> None:
         """Test reconnecting to an existing sandbox."""
         if not is_opensandbox_available:
             pytest.skip("OpenSandbox is not available at the configured URL")
