@@ -6,6 +6,7 @@ description: Automates browser interactions for web testing, form filling, scree
 ## Playwright CLI Skill
 
 Use this skill when the user needs to:
+
 - Navigate websites and interact with web pages
 - Fill forms and click buttons
 - Take screenshots or generate PDFs
@@ -15,11 +16,13 @@ Use this skill when the user needs to:
 ### Prerequisites
 
 Playwright CLI must be installed in the sandbox. If not available, install it via:
+
 ```bash
+npm init playwright@latest
 npm install -g @playwright/cli@latest
-# or
-npx @playwright/cli
 ```
+
+**Note on Headless Mode:** In sandbox environments without a display server, always use `--headless` flag when opening browsers. Most commands also accept a `--headless` flag.
 
 ### Core Commands
 
@@ -81,6 +84,7 @@ playwright-cli localstorage-set <key> <value>
 ### Examples
 
 **Take a screenshot of a website:**
+
 ```bash
 playwright-cli open https://example.com
 playwright-cli screenshot --filename=example.png
@@ -88,6 +92,7 @@ playwright-cli close
 ```
 
 **Fill and submit a form:**
+
 ```bash
 playwright-cli open https://example.com/form
 playwright-cli fill "input[name=email]" "user@example.com"
@@ -98,6 +103,7 @@ playwright-cli close
 ```
 
 **Use a named session (for multiple concurrent browsers):**
+
 ```bash
 playwright-cli -s=session1 open https://example.com
 playwright-cli -s=session2 open https://another.com
@@ -107,6 +113,7 @@ playwright-cli close-all
 ```
 
 **Extract page content:**
+
 ```bash
 playwright-cli open https://example.com
 playwright-cli eval "document.title"
@@ -116,6 +123,7 @@ playwright-cli close
 ```
 
 **Wait for element and interact:**
+
 ```bash
 playwright-cli open https://example.com
 playwright-cli click "button#load-more"
@@ -155,6 +163,17 @@ playwright-cli click "nav button.menu-toggle"
 
 ### Troubleshooting
 
+- **No display server available / Display issues**: In sandbox environments without a display server, always use `--headless` flag:
+  ```bash
+  playwright-cli open https://example.com --browser=chrome --headless
+  playwright-cli screenshot --headless --filename=screenshot.png
+  ```
+- **Browser not found / Executable doesn't exist**: Browser binaries need to be installed separately:
+  ```bash
+  npx playwright install chromium
+  # or for all browsers
+  npx playwright install
+  ```
 - **Element not found**: Use `playwright-cli snapshot` to see available elements
 - **Timeout**: Page may be slow; retry the command or check network
 - **Permission denied**: Some sites block automation; try different user agent

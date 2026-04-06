@@ -55,7 +55,7 @@ agent/
                      #   ensure_no_empty_msg, open_pr_if_needed
   integrations/      # Sandbox provider factories: langsmith, daytona, runloop, modal, local, e2b, opensandbox
   utils/             # Shared helpers: auth, github, slack, linear, sandbox, model, multimodal
-  skills/            # Skill definitions (e.g., playwright_cli.md)
+  skills/            # Skill definitions - each skill is a directory with SKILL.md (e.g., skills/playwright-cli/SKILL.md)
 ```
 
 ### Agent Execution Flow
@@ -177,6 +177,7 @@ DAYTONA_API_URL             # Daytona server URL (default: https://app.daytona.i
 OPENSANDBOX_URL             # OpenSandbox server URL (default: http://localhost:9000)
 OPENSANDBOX_TEMPLATE        # Sandbox template to use (default: opensandbox/code-interpreter:v1.0.2)
 OPENSANDBOX_TIMEOUT         # Default timeout in seconds (default: 300)
+OPENSANDBOX_DENY_EGRESS     # Set to "true" to block all outbound sandbox traffic (default: allow all)
 ```
 
 ## Critical Pitfalls

@@ -12,9 +12,9 @@ import os
 from typing import Any
 
 from langchain.agents.middleware import AgentState, after_agent
-from langgraph_sdk import get_client
 from langgraph.config import get_config
 from langgraph.runtime import Runtime
+from langgraph_sdk import get_client
 
 from ..integrations.daytona import delete_daytona_sandbox
 from ..utils.sandbox_state import SANDBOX_BACKENDS, get_sandbox_id_from_metadata
@@ -50,9 +50,7 @@ async def cleanup_sandbox_after_task(
         # Get sandbox_id from metadata
         sandbox_id = await get_sandbox_id_from_metadata(thread_id)
         if not sandbox_id:
-            logger.debug(
-                "No sandbox_id found for thread %s, skipping cleanup", thread_id
-            )
+            logger.debug("No sandbox_id found for thread %s, skipping cleanup", thread_id)
             return None
 
         # Get the sandbox backend from cache
@@ -89,9 +87,7 @@ async def cleanup_sandbox_after_task(
                 )
                 logger.debug("Cleared sandbox_id from thread %s metadata", thread_id)
             except Exception:
-                logger.exception(
-                    "Failed to clear sandbox_id from thread %s metadata", thread_id
-                )
+                logger.exception("Failed to clear sandbox_id from thread %s metadata", thread_id)
 
     except Exception:
         logger.exception("Error in cleanup_sandbox_after_task middleware")

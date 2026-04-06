@@ -19,9 +19,7 @@ from deepagents.backends.sandbox import BaseSandbox
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_OPENSANDBOX_TEMPLATE = (
-    "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
-)
+DEFAULT_OPENSANDBOX_TEMPLATE = "sandbox-registry.cn-zhangjiakou.cr.aliyuncs.com/opensandbox/code-interpreter:v1.0.2"
 DEFAULT_OPENSANDBOX_TIMEOUT = 300
 DEFAULT_OPENSANDBOX_URL = "http://localhost:9000"
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
@@ -84,7 +82,9 @@ def _build_sandbox_envs() -> dict[str, str]:
 def _resolve_timeout(timeout: int | None) -> int:
     if timeout is not None:
         return timeout
-    env_timeout = os.environ.get("OPENSANDBOX_TIMEOUT") or os.environ.get("SANDBOX_TIMEOUT")
+    env_timeout = os.environ.get("OPENSANDBOX_TIMEOUT") or os.environ.get(
+        "SANDBOX_TIMEOUT"
+    )
     if env_timeout:
         try:
             return int(env_timeout)
@@ -127,12 +127,18 @@ class OpenSandboxBackend(BaseSandbox):
             self._loop,
         ).result()
 
-    async def _init_sandbox(self, sandbox_id: str | None, create_kwargs: dict[str, Any]) -> Any:
+    async def _init_sandbox(
+        self, sandbox_id: str | None, create_kwargs: dict[str, Any]
+    ) -> Any:
         from opensandbox import Sandbox
 
         if sandbox_id:
-            return await Sandbox.connect(sandbox_id, connection_config=self._connection_config)
-        return await Sandbox.create(connection_config=self._connection_config, **create_kwargs)
+            return await Sandbox.connect(
+                sandbox_id, connection_config=self._connection_config
+            )
+        return await Sandbox.create(
+            connection_config=self._connection_config, **create_kwargs
+        )
 
     def _run_async(self, coro: Any) -> Any:
         """Submit a coroutine to the dedicated background event loop and block."""
@@ -181,13 +187,17 @@ class OpenSandboxBackend(BaseSandbox):
             async def _write() -> WriteResult:
                 from opensandbox.models import WriteEntry
 
-                entry = WriteEntry(path=file_path, data=content.encode("utf-8"), mode=644)
+                entry = WriteEntry(
+                    path=file_path, data=content.encode("utf-8"), mode=644
+                )
                 await self._sandbox.files.write_files([entry])
                 return WriteResult(path=file_path, files_update=None)
 
             return self._run_async(_write())
         except Exception as exc:
-            return WriteResult(path=file_path, error=f"Failed to write file '{file_path}': {exc}")
+            return WriteResult(
+                path=file_path, error=f"Failed to write file '{file_path}': {exc}"
+            )
 
     def download_files(self, paths: list[str]) -> list[FileDownloadResponse]:
         """Download multiple files from the OpenSandbox sandbox."""
@@ -200,9 +210,13 @@ class OpenSandboxBackend(BaseSandbox):
                     # SDK may return str or bytes; protocol expects bytes.
                     if isinstance(content, str):
                         content = content.encode("utf-8")
-                    responses.append(FileDownloadResponse(path=path, content=content, error=None))
+                    responses.append(
+                        FileDownloadResponse(path=path, content=content, error=None)
+                    )
                 except Exception as exc:
-                    responses.append(FileDownloadResponse(path=path, content=None, error=str(exc)))
+                    responses.append(
+                        FileDownloadResponse(path=path, content=None, error=str(exc))
+                    )
             return responses
 
         return self._run_async(_download())
@@ -214,7 +228,9 @@ class OpenSandboxBackend(BaseSandbox):
             from opensandbox.models import WriteEntry
 
             responses: list[FileUploadResponse] = []
-            entries = [WriteEntry(path=path, data=data, mode=644) for path, data in files]
+            entries = [
+                WriteEntry(path=path, data=data, mode=644) for path, data in files
+            ]
             try:
                 await self._sandbox.files.write_files(entries)
                 for path, _ in files:
@@ -298,9 +314,31 @@ def create_opensandbox_sandbox(
 
     create_kwargs: dict[str, Any] | None = None
     if not sandbox_id:
+        from opensandbox.models.sandboxes import NetworkPolicy
+
+        # By default, do NOT attach the egress sidecar (network_policy=None).
+        # Without a sidecar the sandbox uses plain Docker bridge networking, which
+        # provides full outbound internet access via Docker's built-in NAT — this
+        # is required for the agent to browse the web, install packages, and use
+        # Playwright.  The egress sidecar intercepts DNS via iptables and can break
+        # browser/playwright connections even in allow-all mode.
+        #
+        # Set OPENSANDBOX_DENY_EGRESS=true to attach the sidecar with a deny-all
+        # egress policy (requires [egress] image to be configured in ~/.sandbox.toml
+        # and docker.network_mode = "bridge").
+        deny_egress = os.environ.get("OPENSANDBOX_DENY_EGRESS", "").lower() in (
+            "1",
+            "true",
+            "yes",
+        )
+        network_policy: NetworkPolicy | None = (
+            NetworkPolicy(default_action="deny") if deny_egress else None
+        )
+
         create_kwargs = {
             "image": template,
             "timeout": timedelta(seconds=resolved_timeout),
+            "network_policy": network_policy,
         }
         if envs:
             create_kwargs["env"] = envs

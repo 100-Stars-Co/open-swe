@@ -19,9 +19,7 @@ def create_daytona_sandbox(sandbox_id: str | None = None):
 
     api_url = os.getenv("DAYTONA_API_URL", "https://app.daytona.io/api")
 
-    daytona = Daytona(
-        config=DaytonaConfig(api_url=api_url, api_key=api_key)
-    )
+    daytona = Daytona(config=DaytonaConfig(api_url=api_url, api_key=api_key))
 
     if sandbox_id:
         sandbox = daytona.get(sandbox_id)
