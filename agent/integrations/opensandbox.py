@@ -278,8 +278,9 @@ def create_opensandbox_sandbox(
         from opensandbox.config import ConnectionConfig
     except ImportError as exc:
         raise ImportError(
-            "OpenSandbox requires the 'opensandbox' package. "
-            "Install it with: uv pip install 'opensandbox'"
+            "OpenSandbox requires the 'opensandbox-code-interpreter' package. "
+            "Install it with: uv sync --extra opensandbox "
+            "or uv pip install 'opensandbox-code-interpreter'"
         ) from exc
 
     template = os.environ.get("OPENSANDBOX_TEMPLATE", DEFAULT_OPENSANDBOX_TEMPLATE)

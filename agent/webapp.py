@@ -1,5 +1,6 @@
 """Custom FastAPI routes for LangGraph server."""
 
+import asyncio
 import hashlib
 import hmac
 import json
@@ -49,6 +50,7 @@ from .utils.jira_webhook import (
 from .utils.linear import post_linear_trace_comment
 from .utils.linear_team_repo_map import LINEAR_TEAM_TO_REPO
 from .utils.multimodal import dedupe_urls, extract_image_urls, fetch_image_block
+from .utils.messages import extract_text_content
 from .utils.repo import extract_repo_from_text
 from .utils.slack import (
     add_slack_reaction,
@@ -63,10 +65,11 @@ from .utils.slack import (
     verify_slack_signature,
 )
 from .utils.telegram import (
+    extract_telegram_branch_overrides,
     generate_thread_id_from_telegram_chat,
     get_telegram_repo_config,
     is_bot_mentioned,
-    post_telegram_trace_reply,
+    send_telegram_chat_action,
     send_telegram_message,
     verify_telegram_secret,
 )
@@ -107,6 +110,8 @@ ALLOWED_GITHUB_ORGS: frozenset[str] = frozenset(
     for org in os.environ.get("ALLOWED_GITHUB_ORGS", "").split(",")
     if org.strip()
 )
+
+_REPO_BRANCH_CONFIRMATION_KEY = "repo_branch_confirmation"
 
 LINEAR_API_KEY = os.environ.get("LINEAR_API_KEY", "")
 
@@ -315,6 +320,20 @@ def _is_not_found_error(exc: Exception) -> bool:
     return getattr(exc, "status_code", None) == 404
 
 
+def _extract_branch_selection_from_thread(thread: dict[str, Any]) -> dict[str, str]:
+    """Extract persisted branch selections from thread metadata."""
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, dict):
+        return {}
+
+    selections: dict[str, str] = {}
+    for key in ("base_branch", "branch_name"):
+        value = metadata.get(key)
+        if isinstance(value, str) and value:
+            selections[key] = value
+    return selections
+
+
 def _is_repo_org_allowed(repo_config: dict[str, str]) -> bool:
     """Check if the repo owner/org is in the allowlist.
 
@@ -331,28 +350,310 @@ async def _upsert_slack_thread_repo_metadata(
     thread_id: str, repo_config: dict[str, str], langgraph_client: LangGraphClient
 ) -> None:
     """Persist the selected repo config on the thread metadata."""
+    await _upsert_thread_metadata(
+        thread_id,
+        {"repo": repo_config},
+        langgraph_client,
+        context="Slack thread repo metadata",
+    )
+
+
+async def _get_thread(thread_id: str, langgraph_client: LangGraphClient) -> dict[str, Any] | None:
+    """Fetch a thread, returning None when it does not exist."""
     try:
-        await langgraph_client.threads.update(
-            thread_id=thread_id, metadata={"repo": repo_config}
-        )
+        return await langgraph_client.threads.get(thread_id)
+    except Exception as exc:  # noqa: BLE001
+        if _is_not_found_error(exc):
+            return None
+        logger.exception("Failed to fetch thread %s", thread_id)
+        return None
+
+
+async def _upsert_telegram_thread_metadata(
+    thread_id: str,
+    metadata: dict[str, Any],
+    langgraph_client: LangGraphClient,
+) -> None:
+    """Persist Telegram repo/branch selections on the LangGraph thread."""
+    await _upsert_thread_metadata(
+        thread_id,
+        metadata,
+        langgraph_client,
+        context="Telegram metadata",
+    )
+
+
+async def _upsert_thread_metadata(
+    thread_id: str,
+    metadata: dict[str, Any],
+    langgraph_client: LangGraphClient,
+    *,
+    context: str,
+) -> None:
+    """Persist thread metadata, creating the thread when needed."""
+    try:
+        await langgraph_client.threads.update(thread_id=thread_id, metadata=metadata)
     except Exception as exc:  # noqa: BLE001
         if _is_not_found_error(exc):
             try:
                 await langgraph_client.threads.create(
                     thread_id=thread_id,
                     if_exists="do_nothing",
-                    metadata={"repo": repo_config},
+                    metadata=metadata,
                 )
             except Exception:  # noqa: BLE001
                 logger.exception(
-                    "Failed to create Slack thread %s while persisting repo metadata",
+                    "Failed to create thread %s while persisting %s",
                     thread_id,
+                    context,
                 )
             return
         logger.exception(
-            "Failed to persist Slack thread repo metadata for thread %s",
+            "Failed to persist %s for thread %s",
+            context,
             thread_id,
         )
+
+
+def _build_selection(
+    repo_config: dict[str, str],
+    *,
+    base_branch: str = "",
+    branch_name: str = "",
+) -> dict[str, Any]:
+    return {
+        "repo": repo_config,
+        "base_branch": base_branch,
+        "branch_name": branch_name,
+    }
+
+
+def _extract_confirmed_selection(thread: dict[str, Any]) -> dict[str, Any] | None:
+    repo_config = _extract_repo_config_from_thread(thread)
+    if not repo_config:
+        return None
+    branch_selection = _extract_branch_selection_from_thread(thread)
+    return _build_selection(
+        repo_config,
+        base_branch=branch_selection.get("base_branch", ""),
+        branch_name=branch_selection.get("branch_name", ""),
+    )
+
+
+def _extract_pending_repo_branch_confirmation(thread: dict[str, Any]) -> dict[str, Any] | None:
+    metadata = thread.get("metadata")
+    if not isinstance(metadata, dict):
+        return None
+    pending = metadata.get(_REPO_BRANCH_CONFIRMATION_KEY)
+    if isinstance(pending, dict) and pending.get("awaiting") is True:
+        return pending
+    return None
+
+
+def _selection_matches(left: dict[str, Any] | None, right: dict[str, Any] | None) -> bool:
+    if not left or not right:
+        return False
+    left_repo = left.get("repo", {})
+    right_repo = right.get("repo", {})
+    return (
+        left_repo.get("owner", "") == right_repo.get("owner", "")
+        and left_repo.get("name", "") == right_repo.get("name", "")
+        and left.get("base_branch", "") == right.get("base_branch", "")
+        and left.get("branch_name", "") == right.get("branch_name", "")
+    )
+
+
+def _is_affirmative_confirmation(text: str) -> bool:
+    normalized = " ".join(text.lower().split())
+    return normalized in {"y", "yes", "ok", "okay", "confirm", "confirmed", "proceed"}
+
+
+def _is_negative_confirmation(text: str) -> bool:
+    normalized = " ".join(text.lower().split())
+    return normalized in {"n", "no", "wrong", "incorrect"}
+
+
+def _update_selection_from_text(
+    text: str,
+    current_selection: dict[str, Any],
+    *,
+    default_owner: str,
+) -> tuple[dict[str, Any], bool]:
+    updated = _build_selection(
+        {
+            "owner": current_selection["repo"]["owner"],
+            "name": current_selection["repo"]["name"],
+        },
+        base_branch=current_selection.get("base_branch", ""),
+        branch_name=current_selection.get("branch_name", ""),
+    )
+    changed = False
+
+    repo_override = extract_repo_from_text(text, default_owner=default_owner)
+    if repo_override:
+        updated["repo"] = repo_override
+        changed = True
+
+    branch_overrides = extract_telegram_branch_overrides(text)
+    if "base_branch" in branch_overrides:
+        updated["base_branch"] = branch_overrides["base_branch"]
+        changed = True
+    if "branch_name" in branch_overrides:
+        updated["branch_name"] = branch_overrides["branch_name"]
+        changed = True
+
+    return updated, changed
+
+
+def _build_pending_confirmation_payload(
+    selection: dict[str, Any],
+    *,
+    source: str,
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    return {
+        "awaiting": True,
+        "source": source,
+        "repo": selection["repo"],
+        "base_branch": selection.get("base_branch", ""),
+        "branch_name": selection.get("branch_name", ""),
+        "request": request,
+    }
+
+
+def _build_confirmation_metadata(
+    selection: dict[str, Any],
+    pending_confirmation: dict[str, Any] | None,
+) -> dict[str, Any]:
+    return {
+        "repo": selection["repo"],
+        "base_branch": selection.get("base_branch", ""),
+        "branch_name": selection.get("branch_name", ""),
+        _REPO_BRANCH_CONFIRMATION_KEY: pending_confirmation or {},
+    }
+
+
+def _format_slack_repo_branch_confirmation_message(selection: dict[str, Any]) -> str:
+    repo = selection["repo"]
+    base_branch = selection.get("base_branch") or "(not set)"
+    branch_name = selection.get("branch_name") or "(not set)"
+    return (
+        "Before I start working, confirm the target repo and branch selection:\n"
+        f"- Repository: `{repo['owner']}/{repo['name']}`\n"
+        f"- Base branch: `{base_branch}`\n"
+        f"- Working branch: `{branch_name}`\n\n"
+        "Reply `yes` to proceed, or send corrected values like "
+        "`repo:owner/name base:main branch:feature/x`."
+    )
+
+
+def _format_telegram_repo_branch_confirmation_message(selection: dict[str, Any]) -> str:
+    repo = selection["repo"]
+    base_branch = selection.get("base_branch") or "(not set)"
+    branch_name = selection.get("branch_name") or "(not set)"
+    return (
+        "Before I start working, confirm the target repo and branch selection:\n"
+        f"- Repository: <code>{repo['owner']}/{repo['name']}</code>\n"
+        f"- Base branch: <code>{base_branch}</code>\n"
+        f"- Working branch: <code>{branch_name}</code>\n\n"
+        "Reply <code>yes</code> to proceed, or send corrected values like "
+        "<code>repo:owner/name base:main branch:feature/x</code>."
+    )
+
+
+def _build_unconfirmed_selection_message(*, channel: str) -> str:
+    if channel == "telegram":
+        return (
+            "I am waiting for repo/branch confirmation. Reply <code>yes</code> to use "
+            "the shown selection, or send corrected <code>repo:</code>, <code>base:</code>, "
+            "and <code>branch:</code> values."
+        )
+    return (
+        "I am waiting for repo/branch confirmation. Reply `yes` to use the shown "
+        "selection, or send corrected `repo:`, `base:`, and `branch:` values."
+    )
+
+
+def _resolve_telegram_selection(
+    text: str,
+    confirmed_selection: dict[str, Any] | None,
+    *,
+    default_owner: str,
+    default_name: str,
+) -> dict[str, Any]:
+    repo_config = get_telegram_repo_config(
+        text=text,
+        default_owner=(confirmed_selection or {}).get("repo", {}).get("owner", default_owner),
+        default_name=(confirmed_selection or {}).get("repo", {}).get("name", default_name),
+    )
+    branch_overrides = extract_telegram_branch_overrides(text)
+    return _build_selection(
+        repo_config,
+        base_branch=branch_overrides.get(
+            "base_branch",
+            (confirmed_selection or {}).get("base_branch", ""),
+        ),
+        branch_name=branch_overrides.get(
+            "branch_name",
+            (confirmed_selection or {}).get("branch_name", ""),
+        ),
+    )
+
+
+def _resolve_slack_selection(
+    text: str,
+    confirmed_selection: dict[str, Any] | None,
+    *,
+    default_owner: str,
+    default_name: str,
+) -> dict[str, Any]:
+    repo_config = extract_repo_from_text(
+        text,
+        default_owner=(confirmed_selection or {}).get("repo", {}).get("owner", default_owner),
+    )
+    if not repo_config:
+        if confirmed_selection:
+            repo_config = confirmed_selection["repo"]
+        else:
+            repo_config = {"owner": default_owner, "name": default_name}
+    branch_overrides = extract_telegram_branch_overrides(text)
+    return _build_selection(
+        repo_config,
+        base_branch=branch_overrides.get(
+            "base_branch",
+            (confirmed_selection or {}).get("base_branch", ""),
+        ),
+        branch_name=branch_overrides.get(
+            "branch_name",
+            (confirmed_selection or {}).get("branch_name", ""),
+        ),
+    )
+
+
+def _is_ai_message(payload: dict[str, Any]) -> bool:
+    role = str(payload.get("role", "")).lower()
+    msg_type = str(payload.get("type", "")).lower()
+    return role == "assistant" or msg_type in {"ai", "aimessage", "aimessagechunk"}
+
+
+def _extract_last_ai_message_text(messages: Any) -> str:
+    if not isinstance(messages, list):
+        return ""
+    for message in reversed(messages):
+        if isinstance(message, dict) and _is_ai_message(message):
+            text = extract_text_content(message.get("content", message))
+            if text:
+                return text
+    return ""
+
+
+async def _telegram_typing_loop(chat_id: int, message_thread_id: int | None, stop_event: asyncio.Event) -> None:
+    while not stop_event.is_set():
+        await send_telegram_chat_action(chat_id, message_thread_id=message_thread_id)
+        try:
+            await asyncio.wait_for(stop_event.wait(), timeout=4)
+        except TimeoutError:
+            continue
 
 
 async def check_if_using_repo_msg_sent(
@@ -718,7 +1019,11 @@ async def process_linear_issue(  # noqa: PLR0912, PLR0915
 
 
 async def process_slack_mention(
-    event_data: dict[str, Any], repo_config: dict[str, str]
+    event_data: dict[str, Any],
+    repo_config: dict[str, str],
+    *,
+    base_branch: str = "",
+    branch_name: str = "",
 ) -> None:
     """Process a Slack app mention by creating or interrupting a thread run."""
     channel_id = event_data.get("channel_id", "")
@@ -795,16 +1100,21 @@ async def process_slack_mention(
     )
     trigger_user = user_name or (f"<@{user_id}>" if user_id else "Unknown user")
 
-    prompt = (
-        "You were mentioned in Slack.\n\n"
-        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Triggered by\n{trigger_user}\n\n"
-        f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n"
-        f"- Context starts at: {context_source}\n\n"
-        f"## Conversation Context\n{context_text}\n\n"
-        f"## Latest Mention Request\n{clean_text}\n\n"
-        "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
-        "status updates, and final summaries."
+    prompt = "".join(
+        [
+            "You were mentioned in Slack.\n\n",
+            f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n",
+            f"## Base Branch\n{base_branch}\n\n" if base_branch else "",
+            f"## Working Branch\n{branch_name}\n\n" if branch_name else "",
+            f"## Triggered by\n{trigger_user}\n\n",
+            f"## Slack Thread\n- Channel: {channel_id}\n- Thread TS: {thread_ts}\n",
+            f"- Context starts at: {context_source}\n\n",
+            f"## Conversation Context\n{context_text}\n\n",
+            f"## Latest Mention Request\n{clean_text}\n\n",
+            "The repository and branch selection were already confirmed by the user. "
+            "Use `slack_thread_reply` to communicate in this Slack thread for clarifications, "
+            "status updates, and final summaries.",
+        ]
     )
     content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
 
@@ -844,9 +1154,25 @@ async def process_slack_mention(
         "user_email": user_email,
         "source": "slack",
     }
+    if base_branch:
+        configurable["base_branch"] = base_branch
+    if branch_name:
+        configurable["branch_name"] = branch_name
 
     langgraph_client = get_client(url=LANGGRAPH_URL)
-    await _upsert_slack_thread_repo_metadata(thread_id, repo_config, langgraph_client)
+    await _upsert_thread_metadata(
+        thread_id,
+        _build_confirmation_metadata(
+            _build_selection(
+                repo_config,
+                base_branch=base_branch,
+                branch_name=branch_name,
+            ),
+            pending_confirmation=None,
+        ),
+        langgraph_client,
+        context="Slack thread repo/branch metadata",
+    )
 
     thread_active = await is_thread_active(thread_id)
     if thread_active:
@@ -869,7 +1195,14 @@ async def process_slack_mention(
         thread_id,
         "agent",
         input={"messages": [{"role": "user", "content": content_blocks}]},
-        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
+        config={
+            "configurable": configurable,
+            "metadata": {
+                **_AGENT_VERSION_METADATA,
+                **({"base_branch": base_branch} if base_branch else {}),
+                **({"branch_name": branch_name} if branch_name else {}),
+            },
+        },
         if_not_exists="create",
         multitask_strategy="interrupt",
     )
@@ -1114,16 +1447,124 @@ async def slack_webhook(
         "text": text,
         "bot_user_id": bot_user_id,
     }
-    repo_config = await get_slack_repo_config(text, channel_id, thread_ts)
+    clean_text = strip_bot_mention(text, bot_user_id, bot_username=SLACK_BOT_USERNAME) or text
+    thread_id = generate_thread_id_from_slack_thread(channel_id, thread_ts)
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    existing_thread = await _get_thread(thread_id, langgraph_client)
+    confirmed_selection = _extract_confirmed_selection(existing_thread or {})
+    pending_confirmation = _extract_pending_repo_branch_confirmation(existing_thread or {})
 
-    if not _is_repo_org_allowed(repo_config):
+    if pending_confirmation and pending_confirmation.get("source") == "slack":
+        pending_selection = _build_selection(
+            pending_confirmation["repo"],
+            base_branch=pending_confirmation.get("base_branch", ""),
+            branch_name=pending_confirmation.get("branch_name", ""),
+        )
+        updated_selection, has_corrections = _update_selection_from_text(
+            clean_text,
+            pending_selection,
+            default_owner=pending_selection["repo"]["owner"],
+        )
+        if has_corrections:
+            if not _is_repo_org_allowed(updated_selection["repo"]):
+                logger.warning(
+                    "Rejecting Slack webhook correction: org '%s' not in ALLOWED_GITHUB_ORGS",
+                    updated_selection["repo"].get("owner"),
+                )
+                return {"status": "ignored", "reason": "Repository org not in allowlist"}
+            await _upsert_thread_metadata(
+                thread_id,
+                _build_confirmation_metadata(
+                    confirmed_selection or updated_selection,
+                    _build_pending_confirmation_payload(
+                        updated_selection,
+                        source="slack",
+                        request=pending_confirmation.get("request", {}),
+                    ),
+                ),
+                langgraph_client,
+                context="Slack repo/branch confirmation correction",
+            )
+            await post_slack_thread_reply(
+                channel_id,
+                thread_ts,
+                _format_slack_repo_branch_confirmation_message(updated_selection),
+            )
+            return {"status": "accepted", "message": "Slack repo/branch confirmation updated"}
+
+        if _is_affirmative_confirmation(clean_text):
+            selection = pending_selection
+            if not _is_repo_org_allowed(selection["repo"]):
+                logger.warning(
+                    "Rejecting Slack confirmation: org '%s' not in ALLOWED_GITHUB_ORGS",
+                    selection["repo"].get("owner"),
+                )
+                return {"status": "ignored", "reason": "Repository org not in allowlist"}
+            await _upsert_thread_metadata(
+                thread_id,
+                _build_confirmation_metadata(selection, pending_confirmation=None),
+                langgraph_client,
+                context="Slack confirmed repo/branch selection",
+            )
+            pending_event_data = pending_confirmation.get("request", {}).get("event_data", {})
+            background_tasks.add_task(
+                process_slack_mention,
+                pending_event_data,
+                selection["repo"],
+                base_branch=selection.get("base_branch", ""),
+                branch_name=selection.get("branch_name", ""),
+            )
+            return {"status": "accepted", "message": "Slack confirmation received; processing queued task"}
+
+        await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            _build_unconfirmed_selection_message(channel="slack"),
+        )
+        return {"status": "accepted", "message": "Slack confirmation still pending"}
+
+    resolved_selection = _resolve_slack_selection(
+        clean_text,
+        confirmed_selection,
+        default_owner=SLACK_REPO_OWNER.strip() or DEFAULT_REPO_OWNER,
+        default_name=SLACK_REPO_NAME.strip() or DEFAULT_REPO_NAME,
+    )
+
+    if not _is_repo_org_allowed(resolved_selection["repo"]):
         logger.warning(
             "Rejecting Slack webhook: org '%s' not in ALLOWED_GITHUB_ORGS",
-            repo_config.get("owner"),
+            resolved_selection["repo"].get("owner"),
         )
         return {"status": "ignored", "reason": "Repository org not in allowlist"}
 
-    background_tasks.add_task(process_slack_mention, event_data, repo_config)
+    if not confirmed_selection or not _selection_matches(confirmed_selection, resolved_selection):
+        await _upsert_thread_metadata(
+            thread_id,
+            _build_confirmation_metadata(
+                confirmed_selection or resolved_selection,
+                _build_pending_confirmation_payload(
+                    resolved_selection,
+                    source="slack",
+                    request={"event_data": event_data},
+                ),
+            ),
+            langgraph_client,
+            context="Slack pending repo/branch confirmation",
+        )
+        await post_slack_thread_reply(
+            channel_id,
+            thread_ts,
+            _format_slack_repo_branch_confirmation_message(resolved_selection),
+        )
+        return {"status": "accepted", "message": "Slack repo/branch confirmation requested"}
+
+    background_tasks.add_task(
+        process_slack_mention,
+        event_data,
+        resolved_selection["repo"],
+        base_branch=resolved_selection.get("base_branch", ""),
+        branch_name=resolved_selection.get("branch_name", ""),
+    )
 
     return {"status": "accepted", "message": "Slack mention queued"}
 
@@ -1134,11 +1575,142 @@ async def slack_webhook_verify() -> dict[str, str]:
     return {"status": "ok", "message": "Slack webhook endpoint is active"}
 
 
+async def _process_telegram_task(
+    request_context: dict[str, Any],
+    repo_config: dict[str, str],
+    *,
+    base_branch: str = "",
+    branch_name: str = "",
+) -> None:
+    chat_id = request_context["chat_id"]
+    message_id = request_context["message_id"]
+    message_thread_id = request_context.get("message_thread_id")
+    user_id = request_context["user_id"]
+    user_name = request_context["user_name"]
+    clean_text = request_context["clean_text"]
+    chat_description = request_context["chat_description"]
+    thread_id = request_context["thread_id"]
+
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    prompt_sections = [
+        "You were sent a message via Telegram.\n\n",
+        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n",
+    ]
+    if base_branch:
+        prompt_sections.append(f"## Base Branch\n{base_branch}\n\n")
+    if branch_name:
+        prompt_sections.append(f"## Working Branch\n{branch_name}\n\n")
+    prompt_sections.extend(
+        [
+            f"## Triggered by\n{user_name}\n\n",
+            f"## Telegram Context\n- {chat_description}\n- Chat ID: {chat_id}\n\n",
+            f"## Message\n{clean_text}\n\n",
+            "The repository and branch selection were already confirmed by the user. "
+            "Telegram progress mode is enabled for this run. Send short milestone "
+            "updates with `telegram_reply` only at important moments, such as when "
+            "you start implementation, move to verification, hit a meaningful "
+            "blocker, or need to explain a major next step. Keep those updates "
+            "brief and practical, and do not send more than 2 interim milestone "
+            "messages during a normal run. The main Telegram reply is sent "
+            "automatically after the run completes.",
+        ]
+    )
+    prompt = "".join(prompt_sections)
+    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
+
+    configurable: dict[str, Any] = {
+        "repo": repo_config,
+        "telegram_chat": {
+            "chat_id": chat_id,
+            "reply_to_message_id": message_id,
+            "message_thread_id": message_thread_id,
+            "triggering_user_id": user_id,
+            "triggering_user_name": user_name,
+        },
+        "telegram_progress_mode": "milestones",
+        "source": "telegram",
+    }
+    if base_branch:
+        configurable["base_branch"] = base_branch
+    if branch_name:
+        configurable["branch_name"] = branch_name
+
+    await _upsert_telegram_thread_metadata(
+        thread_id,
+        _build_confirmation_metadata(
+            _build_selection(repo_config, base_branch=base_branch, branch_name=branch_name),
+            pending_confirmation=None,
+        ),
+        langgraph_client,
+    )
+
+    thread_active = await is_thread_active(thread_id)
+    if thread_active:
+        logger.info(
+            "Thread %s is active, queuing Telegram message for middleware pickup",
+            thread_id,
+        )
+        queued = await queue_message_for_thread(
+            thread_id=thread_id,
+            message_content={"text": prompt, "image_urls": []},
+        )
+        if queued:
+            logger.info("Telegram message queued for thread %s", thread_id)
+            await send_telegram_message(
+                chat_id,
+                "I got your follow-up and will apply it in the current run.",
+                reply_to_message_id=message_id,
+                message_thread_id=message_thread_id,
+            )
+        else:
+            logger.error("Failed to queue Telegram message for thread %s", thread_id)
+        return
+
+    await send_telegram_message(
+        chat_id,
+        "Working on it. I’ll send short updates at important steps.",
+        reply_to_message_id=message_id,
+        message_thread_id=message_thread_id,
+    )
+    await send_telegram_chat_action(chat_id, message_thread_id=message_thread_id)
+    typing_stop = asyncio.Event()
+    typing_task = asyncio.create_task(_telegram_typing_loop(chat_id, message_thread_id, typing_stop))
+    try:
+        final_state = await langgraph_client.runs.wait(
+            thread_id,
+            "agent",
+            input={"messages": [{"role": "user", "content": content_blocks}]},
+            config={
+                "configurable": configurable,
+                "metadata": {
+                    **_AGENT_VERSION_METADATA,
+                    **({"base_branch": base_branch} if base_branch else {}),
+                    **({"branch_name": branch_name} if branch_name else {}),
+                },
+            },
+            if_not_exists="create",
+            multitask_strategy="interrupt",
+        )
+    finally:
+        typing_stop.set()
+        await typing_task
+
+    final_text = _extract_last_ai_message_text((final_state or {}).get("messages"))
+    if not final_text:
+        final_text = "I finished the run, but I do not have a response to show yet."
+    await send_telegram_message(
+        chat_id,
+        final_text,
+        reply_to_message_id=message_id,
+        message_thread_id=message_thread_id,
+    )
+
+
 async def process_telegram_message(
     update: dict[str, Any],
     bot_username: str,
 ) -> None:
-    """Process an incoming Telegram message update and create a LangGraph run."""
+    """Process an incoming Telegram message update with repo/branch confirmation."""
     message = update.get("message", {})
     chat = message.get("chat", {})
     chat_id: int = chat.get("id", 0)
@@ -1169,87 +1741,156 @@ async def process_telegram_message(
 
     thread_id = generate_thread_id_from_telegram_chat(chat_id, message_thread_id)
 
-    default_owner = (
-        os.environ.get("TELEGRAM_REPO_OWNER", "").strip() or DEFAULT_REPO_OWNER
-    )
-    default_name = os.environ.get("TELEGRAM_REPO_NAME", "").strip() or DEFAULT_REPO_NAME
-    repo_config = get_telegram_repo_config(
-        text=clean_text,
-        default_owner=default_owner,
-        default_name=default_name,
-    )
+    langgraph_client = get_client(url=LANGGRAPH_URL)
+    existing_thread = await _get_thread(thread_id, langgraph_client)
+    confirmed_selection = _extract_confirmed_selection(existing_thread or {})
+    pending_confirmation = _extract_pending_repo_branch_confirmation(existing_thread or {})
 
-    if not _is_repo_org_allowed(repo_config):
-        logger.warning(
-            "Rejecting Telegram message: org '%s' not in ALLOWED_GITHUB_ORGS",
-            repo_config.get("owner"),
-        )
-        return
+    default_owner = (
+        confirmed_selection["repo"].get("owner")
+        if confirmed_selection
+        else os.environ.get("TELEGRAM_REPO_OWNER", "").strip() or DEFAULT_REPO_OWNER
+    )
+    default_name = (
+        confirmed_selection["repo"].get("name")
+        if confirmed_selection
+        else os.environ.get("TELEGRAM_REPO_NAME", "").strip() or DEFAULT_REPO_NAME
+    )
 
     chat_title = chat.get("title", "")
     chat_description = (
         f"Chat: {chat_title} ({chat_type})" if chat_title else f"Chat type: {chat_type}"
     )
-
-    prompt = (
-        "You were sent a message via Telegram.\n\n"
-        f"## Repository\n{repo_config.get('owner')}/{repo_config.get('name')}\n\n"
-        f"## Triggered by\n{user_name}\n\n"
-        f"## Telegram Context\n- {chat_description}\n- Chat ID: {chat_id}\n\n"
-        f"## Message\n{clean_text}\n\n"
-        "Use `telegram_reply` to communicate back in this Telegram chat for clarifications, "
-        "status updates, and final summaries."
-    )
-    content_blocks: list[dict[str, Any]] = [create_text_block(prompt)]
-
-    configurable: dict[str, Any] = {
-        "repo": repo_config,
-        "telegram_chat": {
-            "chat_id": chat_id,
-            "reply_to_message_id": message_id,
-            "message_thread_id": message_thread_id,
-            "triggering_user_id": user_id,
-            "triggering_user_name": user_name,
-        },
-        "source": "telegram",
+    request_context = {
+        "chat_id": chat_id,
+        "message_id": message_id,
+        "message_thread_id": message_thread_id,
+        "user_id": user_id,
+        "user_name": user_name,
+        "clean_text": clean_text,
+        "chat_description": chat_description,
+        "thread_id": thread_id,
     }
 
-    # Send an immediate acknowledgment so the user knows the agent is working.
-    await send_telegram_message(
-        chat_id,
-        "👀 On it!",
-        message_thread_id=message_thread_id,
-    )
-
-    langgraph_client = get_client(url=LANGGRAPH_URL)
-    thread_active = await is_thread_active(thread_id)
-
-    if thread_active:
-        logger.info(
-            "Thread %s is active, queuing Telegram message for middleware pickup",
-            thread_id,
+    if pending_confirmation and pending_confirmation.get("source") == "telegram":
+        pending_selection = _build_selection(
+            pending_confirmation["repo"],
+            base_branch=pending_confirmation.get("base_branch", ""),
+            branch_name=pending_confirmation.get("branch_name", ""),
         )
-        queued = await queue_message_for_thread(
-            thread_id=thread_id,
-            message_content={"text": prompt, "image_urls": []},
+        updated_selection, has_corrections = _update_selection_from_text(
+            clean_text,
+            pending_selection,
+            default_owner=pending_selection["repo"]["owner"],
         )
-        if queued:
-            logger.info("Telegram message queued for thread %s", thread_id)
-        else:
-            logger.error("Failed to queue Telegram message for thread %s", thread_id)
+        if has_corrections:
+            if not _is_repo_org_allowed(updated_selection["repo"]):
+                logger.warning(
+                    "Rejecting Telegram correction: org '%s' not in ALLOWED_GITHUB_ORGS",
+                    updated_selection["repo"].get("owner"),
+                )
+                return
+            await _upsert_telegram_thread_metadata(
+                thread_id,
+                _build_confirmation_metadata(
+                    confirmed_selection or updated_selection,
+                    _build_pending_confirmation_payload(
+                        updated_selection,
+                        source="telegram",
+                        request=pending_confirmation.get("request", {}),
+                    ),
+                ),
+                langgraph_client,
+            )
+            await send_telegram_message(
+                chat_id,
+                _format_telegram_repo_branch_confirmation_message(updated_selection),
+                reply_to_message_id=message_id,
+                message_thread_id=message_thread_id,
+            )
+            return
+
+        if _is_affirmative_confirmation(clean_text):
+            selection = pending_selection
+            if not _is_repo_org_allowed(selection["repo"]):
+                logger.warning(
+                    "Rejecting Telegram confirmation: org '%s' not in ALLOWED_GITHUB_ORGS",
+                    selection["repo"].get("owner"),
+                )
+                return
+            await _upsert_telegram_thread_metadata(
+                thread_id,
+                _build_confirmation_metadata(selection, pending_confirmation=None),
+                langgraph_client,
+            )
+            pending_request = pending_confirmation.get("request", {})
+            await _process_telegram_task(
+                {
+                    **request_context,
+                    **pending_request,
+                    "thread_id": thread_id,
+                    "chat_id": chat_id,
+                    "message_thread_id": message_thread_id,
+                },
+                selection["repo"],
+                base_branch=selection.get("base_branch", ""),
+                branch_name=selection.get("branch_name", ""),
+            )
+            return
+
+        await send_telegram_message(
+            chat_id,
+            _build_unconfirmed_selection_message(channel="telegram"),
+            reply_to_message_id=message_id,
+            message_thread_id=message_thread_id,
+        )
         return
 
-    run = await langgraph_client.runs.create(
-        thread_id,
-        "agent",
-        input={"messages": [{"role": "user", "content": content_blocks}]},
-        config={"configurable": configurable, "metadata": _AGENT_VERSION_METADATA},
-        if_not_exists="create",
-        multitask_strategy="interrupt",
+    resolved_selection = _resolve_telegram_selection(
+        clean_text,
+        confirmed_selection,
+        default_owner=default_owner,
+        default_name=default_name,
     )
-    logger.info("LangGraph run created for Telegram thread %s", thread_id)
-    await post_telegram_trace_reply(
-        chat_id, run["run_id"], message_thread_id=message_thread_id
+    if not _is_repo_org_allowed(resolved_selection["repo"]):
+        logger.warning(
+            "Rejecting Telegram message: org '%s' not in ALLOWED_GITHUB_ORGS",
+            resolved_selection["repo"].get("owner"),
+        )
+        return
+
+    if not confirmed_selection or not _selection_matches(confirmed_selection, resolved_selection):
+        await _upsert_telegram_thread_metadata(
+            thread_id,
+            _build_confirmation_metadata(
+                confirmed_selection or resolved_selection,
+                _build_pending_confirmation_payload(
+                    resolved_selection,
+                    source="telegram",
+                    request={
+                        "message_id": message_id,
+                        "user_id": user_id,
+                        "user_name": user_name,
+                        "clean_text": clean_text,
+                        "chat_description": chat_description,
+                    },
+                ),
+            ),
+            langgraph_client,
+        )
+        await send_telegram_message(
+            chat_id,
+            _format_telegram_repo_branch_confirmation_message(resolved_selection),
+            reply_to_message_id=message_id,
+            message_thread_id=message_thread_id,
+        )
+        return
+
+    await _process_telegram_task(
+        request_context,
+        resolved_selection["repo"],
+        base_branch=resolved_selection.get("base_branch", ""),
+        branch_name=resolved_selection.get("branch_name", ""),
     )
 
 

@@ -6,6 +6,7 @@ import hashlib
 import hmac
 import logging
 import os
+import re
 import uuid
 from typing import Any
 
@@ -19,6 +20,7 @@ TELEGRAM_API_BASE_URL = "https://api.telegram.org"
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_REPO_OWNER = os.environ.get("TELEGRAM_REPO_OWNER", "")
 TELEGRAM_REPO_NAME = os.environ.get("TELEGRAM_REPO_NAME", "")
+_BRANCH_NAME_PATTERN = r"[A-Za-z0-9._/-]+"
 
 
 def _telegram_api_url(method: str) -> str:
@@ -96,27 +98,51 @@ async def send_telegram_message(
         logger.error("TELEGRAM_BOT_TOKEN is not set — cannot send Telegram message")
         return {"ok": False, "error": "TELEGRAM_BOT_TOKEN not configured"}
 
-    payload: dict[str, Any] = {
-        "chat_id": chat_id,
-        "text": text,
-        "parse_mode": parse_mode,
-    }
+    payload: dict[str, Any] = {"chat_id": chat_id, "text": text}
+    if parse_mode:
+        payload["parse_mode"] = parse_mode
     if reply_to_message_id is not None:
         payload["reply_to_message_id"] = reply_to_message_id
     if message_thread_id is not None:
         payload["message_thread_id"] = message_thread_id
 
+    return await _telegram_api_request("sendMessage", payload, chat_id=chat_id)
+
+
+async def send_telegram_chat_action(
+    chat_id: int,
+    *,
+    action: str = "typing",
+    message_thread_id: int | None = None,
+) -> dict[str, Any]:
+    """Send a Telegram chat action such as typing."""
+    payload: dict[str, Any] = {"chat_id": chat_id, "action": action}
+    if message_thread_id is not None:
+        payload["message_thread_id"] = message_thread_id
+    return await _telegram_api_request("sendChatAction", payload, chat_id=chat_id)
+
+
+async def _telegram_api_request(
+    method: str,
+    payload: dict[str, Any],
+    *,
+    chat_id: int,
+) -> dict[str, Any]:
+    if not TELEGRAM_BOT_TOKEN:
+        logger.error("TELEGRAM_BOT_TOKEN is not set — cannot call Telegram API")
+        return {"ok": False, "error": "TELEGRAM_BOT_TOKEN not configured"}
+
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(_telegram_api_url("sendMessage"), json=payload)
+            response = await client.post(_telegram_api_url(method), json=payload)
             data = response.json()
             if not data.get("ok"):
                 logger.warning(
-                    "Telegram sendMessage failed: %s", data.get("description", "unknown error")
+                    "Telegram %s failed: %s", method, data.get("description", "unknown error")
                 )
             return data
     except Exception:
-        logger.exception("Error sending Telegram message to chat %s", chat_id)
+        logger.exception("Error calling Telegram %s for chat %s", method, chat_id)
         return {"ok": False, "error": "Request failed"}
 
 
@@ -185,6 +211,49 @@ def get_telegram_repo_config(
         repo_config = {"owner": owner_default, "name": name_default}
 
     return repo_config
+
+
+def extract_telegram_branch_overrides(text: str | None = None) -> dict[str, str]:
+    """Extract base/working branch overrides from Telegram message text.
+
+    Explicit directives win:
+    - ``base:main``
+    - ``branch:feature/foo``
+
+    The fallback patterns only match simple, obvious natural-language phrases
+    such as ``base branch main`` or ``use branch feature/foo``.
+    """
+    if not text:
+        return {}
+
+    def _match_first(patterns: list[str]) -> str:
+        for pattern in patterns:
+            match = re.search(pattern, text, flags=re.IGNORECASE)
+            if match:
+                return (match.group("value") or "").strip()
+        return ""
+
+    base_branch = _match_first(
+        [
+            rf"\b(?:base|target)\s+branch\s+(?P<value>{_BRANCH_NAME_PATTERN})",
+            rf"\bbase\s*[:=]\s*(?P<value>{_BRANCH_NAME_PATTERN})",
+            rf"\bmerge\s+into\s+(?P<value>{_BRANCH_NAME_PATTERN})",
+        ]
+    )
+    branch_name = _match_first(
+        [
+            rf"\bbranch\s*[:=]\s*(?P<value>{_BRANCH_NAME_PATTERN})",
+            rf"\b(?:working|work)\s+branch\s+(?P<value>{_BRANCH_NAME_PATTERN})",
+            rf"\b(?:use|checkout|check\s+out|on)\s+branch\s+(?P<value>{_BRANCH_NAME_PATTERN})",
+        ]
+    )
+
+    overrides: dict[str, str] = {}
+    if base_branch:
+        overrides["base_branch"] = base_branch
+    if branch_name:
+        overrides["branch_name"] = branch_name
+    return overrides
 
 
 async def post_telegram_trace_reply(

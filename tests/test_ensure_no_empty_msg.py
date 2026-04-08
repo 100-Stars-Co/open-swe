@@ -122,6 +122,13 @@ class TestCheckIfModelMessagedUser:
 
         assert check_if_model_messaged_user(messages) is True
 
+    def test_returns_true_for_telegram_reply(self) -> None:
+        messages = [
+            ToolMessage(content="replied", tool_call_id="123", name="telegram_reply"),
+        ]
+
+        assert check_if_model_messaged_user(messages) is True
+
     def test_returns_false_for_other_tools(self) -> None:
         messages = [
             ToolMessage(content="result", tool_call_id="123", name="bash"),

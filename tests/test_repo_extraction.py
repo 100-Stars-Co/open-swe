@@ -53,6 +53,10 @@ class TestExtractRepoFromText:
         result = extract_repo_from_text("repo:my-org/my-repo/")
         assert result == {"owner": "my-org", "name": "my-repo"}
 
+    def test_plain_language_repo_or_does_not_parse_as_repo(self) -> None:
+        result = extract_repo_from_text("follow-up message without repo or branch overrides")
+        assert result is None
+
 
 class TestLinearWebhookRepoOverride:
     """Test that the Linear webhook handler checks comment body for repo config first."""

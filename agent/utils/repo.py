@@ -22,8 +22,22 @@ def extract_repo_from_text(text: str, default_owner: str | None = None) -> dict[
     owner: str | None = None
     name: str | None = None
 
-    if "repo:" in text or "repo " in text:
-        match = re.search(r"repo[: ]([a-zA-Z0-9_.\-/]+)", text)
+    if "repo:" in text:
+        match = re.search(r"\brepo:\s*([a-zA-Z0-9_.\-/]+)", text)
+        if match:
+            value = match.group(1).rstrip("/")
+            if "/" in value:
+                owner, name = value.split("/", 1)
+            else:
+                owner = default_owner
+                name = value
+
+    if (not owner or not name) and "repo " in text:
+        match = re.search(
+            r"\brepo\s+([a-zA-Z0-9_.-]+/[a-zA-Z0-9_.-]+|[a-zA-Z0-9_.-]*[-_.][a-zA-Z0-9_.-]*)",
+            text,
+            flags=re.IGNORECASE,
+        )
         if match:
             value = match.group(1).rstrip("/")
             if "/" in value:

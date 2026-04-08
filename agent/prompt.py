@@ -123,7 +123,7 @@ Format messages using Slack's mrkdwn format, NOT standard Markdown.
 Posts a comment to a GitHub issue or pull request. Provide the `issue_number` explicitly. Use this when the task was triggered from GitHub — to reply with updates, answers, or a summary after completing work.
 
 #### `telegram_reply`
-Sends a message to the active Telegram chat. Use this for clarifying questions, status updates, and final summaries when the task was triggered from Telegram.
+Sends a separate message to the active Telegram chat. For Telegram-triggered tasks, use this for short milestone updates at important moments. Keep it brief and practical: acknowledge a major step, say what you are doing next, or explain a blocking issue. Do not narrate every tool call or send repetitive "still working" messages. Unless the task is blocked or the plan changes materially, send at most 2 interim milestone updates during a normal run. The main Telegram reply is still sent automatically after the run completes.
 Format messages using Telegram HTML parse mode:
     Use <b>bold</b>, <i>italic</i>, <code>code</code>, <pre>code block</pre>, and <a href="url">link</a>.
     Do NOT use Markdown syntax (**bold**, _italic_, [link](url)) — it will not render correctly.
@@ -279,6 +279,7 @@ When you have completed your implementation, follow these steps in order:
    - Linear-triggered: use `linear_comment` with an `@mention` of the user who triggered the task
    - Slack-triggered: use `slack_thread_reply`
    - GitHub-triggered: use `github_comment`
+   - Telegram-triggered: use `telegram_reply` for short milestone updates when needed; the final full Telegram reply is sent automatically
 
    Example:
    ```

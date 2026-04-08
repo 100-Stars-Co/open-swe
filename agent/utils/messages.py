@@ -5,7 +5,7 @@ from __future__ import annotations
 from langchain_core.messages import ContentBlock
 
 
-def extract_text_content(content: str | list[ContentBlock]) -> str:
+def extract_text_content(content: str | list[ContentBlock] | dict) -> str:
     """Extract human-readable text from model message content.
 
     Supports:
@@ -16,6 +16,13 @@ def extract_text_content(content: str | list[ContentBlock]) -> str:
 
     if isinstance(content, str):
         return content.strip()
+
+    if isinstance(content, dict):
+        if isinstance(content.get("text"), str):
+            return content["text"].strip()
+        if "content" in content:
+            return extract_text_content(content["content"])
+        return ""
 
     if not isinstance(content, list):
         return ""

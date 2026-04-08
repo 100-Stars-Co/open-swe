@@ -507,5 +507,8 @@ class TestOpenSandboxConfiguration:
         """Test that create_opensandbox_sandbox raises ImportError when package not installed."""
         # Patch the import to raise ImportError
         with patch.dict("sys.modules", {"opensandbox": None}):
-            with pytest.raises(ImportError, match="opensandbox"):
+            with pytest.raises(
+                ImportError,
+                match="opensandbox-code-interpreter|uv sync --extra opensandbox",
+            ):
                 create_opensandbox_sandbox()
