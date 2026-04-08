@@ -71,6 +71,7 @@ from .tools import (
     list_pr_reviews,
     slack_thread_reply,
     submit_pr_review,
+    telegram_reply,
     update_pr_review,
     web_search,
 )
@@ -476,6 +477,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             linear_update_issue,
             slack_thread_reply,
             github_comment,
+            telegram_reply,
             list_pr_reviews,
             get_pr_review,
             create_pr_review,
