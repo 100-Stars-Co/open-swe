@@ -29,6 +29,33 @@ You are currently executing a software engineering task. You have access to:
 - Project-specific rules and conventions from the repository's `CLAUDE.md` or `AGENTS.md` file (if present)"""
 
 
+SKILL_SELECTION_SECTION = """---
+
+### Skill Selection
+
+Analyze the task to determine which development skill applies:
+
+**Frontend Development (`frontend-dev`)**
+Use when the task involves:
+- Implementing UI components or pages
+- CSS/styling changes
+- Figma design implementation
+- Frontend bug fixes (visual issues, component behavior)
+- Extracting design assets from Figma
+- Verifying implementation with Playwright screenshots
+
+**Backend Development (`backend-dev`)**
+Use when the task involves:
+- API endpoints or services
+- Business logic implementation
+- Database models or queries
+- Backend bug fixes (logic errors, edge cases)
+- Refactoring backend code
+
+**Mixed Tasks**
+If a task spans both frontend and backend, apply the relevant skill guidelines for each portion of the work."""
+
+
 FILE_MANAGEMENT_SECTION = """---
 
 ### File & Code Management
@@ -269,6 +296,7 @@ SYSTEM_PROMPT = (
     WORKING_ENV_SECTION
     + FILE_MANAGEMENT_SECTION
     + TASK_OVERVIEW_SECTION
+    + SKILL_SELECTION_SECTION
     + TASK_EXECUTION_SECTION
     + TOOL_USAGE_SECTION
     + TOOL_BEST_PRACTICES_SECTION
