@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 # TODO: Update this to include your specific sandbox configuration
 DAYTONA_SANDBOX_PARAMS = CreateSandboxFromSnapshotParams(
-    snapshot="daytonaio/sandbox:0.6.0"
+    name="daytona-medium", snapshot="daytonaio/sandbox:0.6.0"
 )
 
 

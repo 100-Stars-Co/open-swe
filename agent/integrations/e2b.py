@@ -17,7 +17,7 @@ from deepagents.backends.sandbox import BaseSandbox
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_E2B_TEMPLATE = "claude"
+DEFAULT_E2B_TEMPLATE = "opencode"
 DEFAULT_E2B_TIMEOUT = 300
 ANTHROPIC_API_KEY_ENV = "ANTHROPIC_API_KEY"
 
