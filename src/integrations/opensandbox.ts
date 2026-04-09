@@ -124,10 +124,8 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
 
   async execute(command: string): Promise<ExecuteResponse> {
     try {
-      // The opensandbox SDK exposes commands.run(cmd, opts)
-      const result = await this._sandbox.commands.run(command, {
-        timeout: this._defaultTimeout * 1000, // milliseconds
-      });
+      // The SDK exposes commands.run(cmd, opts?, handlers?)
+      const result = await this._sandbox.commands.run(command);
 
       // Extract stdout/stderr from logs
       const stdoutMsgs: unknown[] = result?.logs?.stdout ?? [];
@@ -142,7 +140,7 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
         .join("");
 
       const output = [stdout, stderr].filter(Boolean).join("\n");
-      const exitCode: number = result?.exit_code ?? 0;
+      const exitCode: number = result?.exitCode ?? 0;
 
       return { output, exitCode, truncated: false };
     } catch (err) {
@@ -176,8 +174,8 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
   async write(filePath: string, content: string): Promise<WriteResult> {
     try {
       // Use the SDK's file write if available
-      if (this._sandbox?.files?.write_files) {
-        await this._sandbox.files.write_files([
+      if (this._sandbox?.files?.writeFiles) {
+        await this._sandbox.files.writeFiles([
           {
             path: filePath,
             data: new TextEncoder().encode(content),
@@ -299,8 +297,8 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
     return Promise.all(
       paths.map(async (p) => {
         try {
-          if (this._sandbox?.files?.read_file) {
-            const content = await this._sandbox.files.read_file(p);
+          if (this._sandbox?.files?.readFile) {
+            const content = await this._sandbox.files.readFile(p);
             return {
               path: p,
               content:
@@ -361,13 +359,13 @@ export async function createOpenSandbox(
 
   try {
     // biome-ignore lint/suspicious/noExplicitAny: optional peer dependency
-    const sdk = await import("opensandbox" as any);
+    const sdk = await import("@alibaba-group/opensandbox" as any);
     Sandbox = sdk.Sandbox;
-    ConnectionConfig = sdk.ConnectionConfig ?? sdk.config?.ConnectionConfig;
+    ConnectionConfig = sdk.ConnectionConfig;
   } catch {
     throw new Error(
-      "OpenSandbox requires the 'opensandbox' npm package. " +
-        "Install it with: pnpm add opensandbox",
+      "OpenSandbox requires the '@alibaba-group/opensandbox' npm package. " +
+        "Install it with: pnpm add @alibaba-group/opensandbox",
     );
   }
 
@@ -390,8 +388,9 @@ export async function createOpenSandbox(
   let rawSandbox: any;
 
   if (sandboxId) {
-    rawSandbox = await Sandbox.connect(sandboxId, {
-      connection_config: connectionConfig,
+    rawSandbox = await Sandbox.connect({
+      connectionConfig,
+      sandboxId,
     });
   } else {
     const denyEgress = ["1", "true", "yes"].includes(
@@ -399,13 +398,13 @@ export async function createOpenSandbox(
     );
 
     const createOpts: Record<string, unknown> = {
+      connectionConfig,
       image: template,
-      timeout: resolvedTimeout * 1000, // ms
-      connection_config: connectionConfig,
+      timeoutSeconds: resolvedTimeout,
     };
 
     if (denyEgress) {
-      createOpts.network_policy = { default_action: "deny" };
+      createOpts.networkPolicy = { defaultAction: "deny" };
     }
 
     if (Object.keys(envs).length) {

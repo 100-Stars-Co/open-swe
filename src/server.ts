@@ -48,6 +48,7 @@ import {
   persistEncryptedGithubToken,
   resolveGithubToken,
 } from "./utils/auth.js";
+import { makeModel } from "./utils/model.js";
 import {
   cleanupGitCredentials,
   gitCheckoutBranch,
@@ -75,6 +76,34 @@ const DEFAULT_LLM_MODEL_ID =
 const DEFAULT_RECURSION_LIMIT = 1_000; // reserved for future use
 void DEFAULT_RECURSION_LIMIT;
 const SANDBOX_CREATION_TIMEOUT_MS = 180_000; // 3 minutes
+
+const registeredTools = [
+  // Core
+  fetchUrl,
+  httpRequest,
+  webSearch,
+  commitAndOpenPr,
+  // GitHub
+  githubComment,
+  listPrReviews,
+  getPrReview,
+  createPrReview,
+  submitPrReview,
+  dismissPrReview,
+  listPrReviewComments,
+  // Jira
+  jiraGetIssue,
+  jiraSearchIssues,
+  jiraCreateIssue,
+  jiraUpdateIssue,
+  jiraAddComment,
+  jiraGetTransitions,
+  jiraTransitionIssue,
+  // Telegram
+  telegramReply,
+  // Verification
+  verifyPrTool,
+];
 
 // ─── Repo / config types ──────────────────────────────────────────────────────
 
@@ -104,12 +133,30 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
   const configurable = (config.configurable ?? {}) as AgentConfigurable;
   const { thread_id: threadId, repo, base_branch: baseBranch } = configurable;
 
-  if (!threadId)
-    throw new Error("thread_id is required in config.configurable");
-  if (!repo?.owner || !repo?.name) {
-    throw new Error(
-      "repo.owner and repo.name are required in config.configurable",
-    );
+  // We only require these if we are actually running the agent.
+  // LangGraph calls this during schema generation/loading where they might be missing.
+  if (!threadId || !repo?.owner || !repo?.name) {
+    if (!process.env.ANTHROPIC_API_KEY && !process.env.OPENAI_API_KEY) {
+      // If we don't have an API key, we can't initialize the real agent.
+      // We return a minimal StateGraph that defines the same structure
+      // so the schema endpoints (GET /schemas) work correctly.
+      const { StateGraph } = await import("@langchain/langgraph");
+      const { Annotation } = await import("@langchain/langgraph");
+
+      const Schema = Annotation.Root({
+        messages: Annotation<any[]>({
+          reducer: (x, y) => x.concat(y),
+          default: () => [],
+        }),
+      });
+
+      return new StateGraph(Schema).compile();
+    }
+
+    return createDeepAgent({
+      tools: registeredTools,
+      middleware: [],
+    });
   }
 
   // 1. Resolve GitHub token
@@ -141,33 +188,7 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
   });
 
   // 7. Tool list
-  const tools = [
-    // Core
-    fetchUrl,
-    httpRequest,
-    webSearch,
-    commitAndOpenPr,
-    // GitHub
-    githubComment,
-    listPrReviews,
-    getPrReview,
-    createPrReview,
-    submitPrReview,
-    dismissPrReview,
-    listPrReviewComments,
-    // Jira
-    jiraGetIssue,
-    jiraSearchIssues,
-    jiraCreateIssue,
-    jiraUpdateIssue,
-    jiraAddComment,
-    jiraGetTransitions,
-    jiraTransitionIssue,
-    // Telegram
-    telegramReply,
-    // Verification
-    verifyPrTool,
-  ];
+  const tools = [...registeredTools];
 
   // Figma tools — only include if FIGMA_API_KEY is set
   if (process.env.FIGMA_API_KEY) {
@@ -186,8 +207,9 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
   ];
 
   // 9. Create and return agent
+  const model = await makeModel(DEFAULT_LLM_MODEL_ID);
   return createDeepAgent({
-    model: DEFAULT_LLM_MODEL_ID,
+    model,
     // biome-ignore lint/suspicious/noExplicitAny: tool types vary across langchain versions
     tools: tools as any[],
     // biome-ignore lint/suspicious/noExplicitAny: middleware types vary by deepagents version

@@ -6,6 +6,7 @@
  * for a short-lived installation token.
  */
 
+import { createPrivateKey } from "crypto";
 import { SignJWT, importPKCS8 } from "jose";
 
 const GITHUB_API_BASE = "https://api.github.com";
@@ -42,7 +43,13 @@ export async function generateAppJwt(): Promise<string> {
   const { appId, privateKey } = getAppCredentials();
   const now = Math.floor(Date.now() / 1000);
 
-  const key = await importPKCS8(privateKey, "RS256");
+  // Convert PKCS#1 ("BEGIN RSA PRIVATE KEY") to PKCS#8 ("BEGIN PRIVATE KEY") if needed,
+  // since jose's importPKCS8 only accepts PKCS#8 format.
+  const normalizedKey = privateKey.includes("BEGIN RSA PRIVATE KEY")
+    ? createPrivateKey(privateKey).export({ type: "pkcs8", format: "pem" }).toString()
+    : privateKey;
+
+  const key = await importPKCS8(normalizedKey, "RS256");
 
   return new SignJWT({})
     .setProtectedHeader({ alg: "RS256" })

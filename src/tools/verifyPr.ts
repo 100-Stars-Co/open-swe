@@ -292,12 +292,18 @@ async function planCommandsWithModel(
   const prompt = `You are planning CI verification commands for a checked-out repository.\nReturn JSON only with keys: repo_type, setup_commands, verification_commands, reasoning.\nEach command must be an array of argv strings.\nRules:\n- Use repo-native commands only.\n- Prefer Makefile targets if the repo is make-based.\n- For JS/TS repos, prefer the detected package manager and only scripts that exist.\n- Do not invent commands not supported by the repo.\n- If no safe plan exists, return empty command arrays and explain why.\nRepository scan:\n${JSON.stringify(scan, null, 2)}\nKnown scripts: ${JSON.stringify(scripts)}`;
 
   try {
-    const { initChatModel } = await import("langchain");
-    const model = await initChatModel(DEFAULT_VERIFY_MODEL, {
+    const { makeModel } = await import("../utils/model.js");
+    const model = await makeModel(DEFAULT_VERIFY_MODEL, {
       temperature: 0,
       maxTokens: 1500,
     });
-    const response = await model.invoke(prompt);
+    const resolvedModel =
+      typeof model === "string"
+        ? await (
+            await import("langchain")
+          ).initChatModel(model, { temperature: 0, maxTokens: 1500 })
+        : model;
+    const response = await resolvedModel.invoke(prompt);
     let content = response.content;
     if (Array.isArray(content)) {
       content = content
