@@ -6,9 +6,13 @@
  * this middleware checks for uncommitted changes and opens a PR automatically.
  */
 
+import { type AIMessage, ToolMessage } from "@langchain/core/messages";
+import type { SandboxBackendProtocol } from "deepagents";
 import { createMiddleware } from "langchain";
-import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { generateBranchName } from "../utils/extract.js";
 import {
+  createGithubPr,
+  getGithubDefaultBranch,
   gitAddAll,
   gitCheckoutBranch,
   gitCommit,
@@ -17,12 +21,8 @@ import {
   gitHasUncommittedChanges,
   gitHasUnpushedCommits,
   gitPush,
-  getGithubDefaultBranch,
-  createGithubPr,
 } from "../utils/github.js";
 import { getSandboxBackend } from "../utils/sandboxState.js";
-import { generateBranchName } from "../utils/extract.js";
-import type { SandboxBackendProtocol } from "deepagents";
 
 export const openPrIfNeededMiddleware = createMiddleware({
   name: "OpenPrIfNeeded",
@@ -36,7 +36,8 @@ export const openPrIfNeededMiddleware = createMiddleware({
 
     if (!threadId || !repo) return {};
 
-    const messages = ((state as Record<string, unknown>).messages as (AIMessage | ToolMessage)[]) ?? [];
+    const messages =
+      ((state as Record<string, unknown>).messages as (AIMessage | ToolMessage)[]) ?? [];
 
     // Check if commit_and_open_pr was already called successfully
     const prAlreadyCreated = messages.some(
@@ -109,7 +110,9 @@ export const openPrIfNeededMiddleware = createMiddleware({
 
 async function resolveGithubTokenForMiddleware(
   threadId: string,
-): Promise<[string, string | null, ReturnType<typeof import("../utils/auth.js")["resolveGithubToken"]>]> {
+): Promise<
+  [string, string | null, ReturnType<typeof import("../utils/auth.js")["resolveGithubToken"]>]
+> {
   const { resolveGithubToken } = await import("../utils/auth.js");
   const [token, encrypted] = await resolveGithubToken({}, threadId);
   return [token, encrypted, null as unknown as ReturnType<typeof resolveGithubToken>];

@@ -11,7 +11,11 @@ import { SignJWT, importPKCS8 } from "jose";
 const GITHUB_API_BASE = "https://api.github.com";
 const JWT_EXPIRY_SECONDS = 600; // 10 minutes (GitHub App maximum)
 
-function getAppCredentials(): { appId: string; privateKey: string; installationId: string } {
+function getAppCredentials(): {
+  appId: string;
+  privateKey: string;
+  installationId: string;
+} {
   const appId = process.env.GITHUB_APP_ID;
   const privateKey = process.env.GITHUB_APP_PRIVATE_KEY;
   const installationId = process.env.GITHUB_APP_INSTALLATION_ID;
@@ -24,7 +28,11 @@ function getAppCredentials(): { appId: string; privateKey: string; installationI
   }
 
   // Allow \n literal in env var (common in .env files) to be treated as real newlines
-  return { appId, privateKey: privateKey.replace(/\\n/g, "\n"), installationId };
+  return {
+    appId,
+    privateKey: privateKey.replace(/\\n/g, "\n"),
+    installationId,
+  };
 }
 
 /**

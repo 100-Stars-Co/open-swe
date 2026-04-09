@@ -6,12 +6,15 @@
  * The open_pr middleware acts as a safety net if the agent forgets to call it.
  */
 
-import { tool } from "@langchain/core/tools";
 import type { RunnableConfig } from "@langchain/core/runnables";
+import { tool } from "@langchain/core/tools";
 import type { SandboxBackendProtocol } from "deepagents";
 import { z } from "zod";
+import { resolveGithubToken } from "../utils/auth.js";
+import { generateBranchName } from "../utils/extract.js";
 import {
   createGithubPr,
+  getGithubDefaultBranch,
   gitAddAll,
   gitCheckoutBranch,
   gitCommit,
@@ -20,11 +23,8 @@ import {
   gitHasUncommittedChanges,
   gitHasUnpushedCommits,
   gitPush,
-  getGithubDefaultBranch,
 } from "../utils/github.js";
-import { resolveGithubToken } from "../utils/auth.js";
 import { getSandboxBackend } from "../utils/sandboxState.js";
-import { generateBranchName } from "../utils/extract.js";
 
 const schema = z.object({
   title: z.string().describe("The pull request title. Should be concise and descriptive."),
@@ -34,9 +34,7 @@ const schema = z.object({
   commitMessage: z
     .string()
     .optional()
-    .describe(
-      "Optional custom git commit message. Defaults to the PR title if not provided.",
-    ),
+    .describe("Optional custom git commit message. Defaults to the PR title if not provided."),
 });
 
 export const commitAndOpenPr = tool(
@@ -47,12 +45,18 @@ export const commitAndOpenPr = tool(
     const issueNumber = configurable.issue_number as number | undefined;
 
     if (!repo) {
-      return JSON.stringify({ error: "No repo configured in thread config", status: "error" });
+      return JSON.stringify({
+        error: "No repo configured in thread config",
+        status: "error",
+      });
     }
 
     const sandbox = getSandboxBackend(threadId) as SandboxBackendProtocol;
     if (!sandbox) {
-      return JSON.stringify({ error: "No sandbox found for this thread", status: "error" });
+      return JSON.stringify({
+        error: "No sandbox found for this thread",
+        status: "error",
+      });
     }
 
     try {
@@ -80,21 +84,17 @@ export const commitAndOpenPr = tool(
         const message = commitMessage ?? title;
         const commitResult = await gitCommit(sandbox, repoDir, message);
         if (commitResult.exitCode !== 0) {
-          return JSON.stringify({ error: commitResult.output, status: "error" });
+          return JSON.stringify({
+            error: commitResult.output,
+            status: "error",
+          });
         }
       }
 
       // Push
       const hasPushed = hasChanges || (await gitHasUnpushedCommits(sandbox, repoDir));
       if (hasPushed) {
-        const pushResult = await gitPush(
-          sandbox,
-          repoDir,
-          branch,
-          token,
-          repo.owner,
-          repo.name,
-        );
+        const pushResult = await gitPush(sandbox, repoDir, branch, token, repo.owner, repo.name);
         if (pushResult.exitCode !== 0) {
           return JSON.stringify({ error: pushResult.output, status: "error" });
         }

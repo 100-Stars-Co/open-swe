@@ -7,9 +7,9 @@
  * reads the FIFO queue and injects any pending messages as new human turns.
  */
 
-import { createMiddleware } from "langchain";
-import { Client } from "@langchain/langgraph-sdk";
 import { HumanMessage } from "@langchain/core/messages";
+import { Client } from "@langchain/langgraph-sdk";
+import { createMiddleware } from "langchain";
 
 const QUEUE_NAMESPACE_PREFIX = "queue";
 const QUEUE_KEY = "pending_messages";
@@ -35,9 +35,7 @@ export const checkMessageQueueMiddleware = createMiddleware({
       await client.store.deleteItem([QUEUE_NAMESPACE_PREFIX, threadId], QUEUE_KEY);
 
       // Inject each queued message as a human turn
-      const injectedMessages = pending.messages.map(
-        (content) => new HumanMessage(content),
-      );
+      const injectedMessages = pending.messages.map((content) => new HumanMessage(content));
 
       const currentMessages = ((state as Record<string, unknown>).messages as HumanMessage[]) ?? [];
       return { messages: [...currentMessages, ...injectedMessages] };

@@ -120,7 +120,7 @@ export const httpRequest = tool(
         success: response.ok,
         status_code: response.status,
         headers: responseHeaders,
-        content: truncated ? content.slice(0, 100_000) + "\n[truncated]" : content,
+        content: truncated ? `${content.slice(0, 100_000)}\n[truncated]` : content,
         truncated,
       });
     } catch (err) {

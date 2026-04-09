@@ -18,8 +18,7 @@ export const jiraAddComment = tool(
   },
   {
     name: "jira_add_comment",
-    description:
-      "Add a comment to a Jira issue. Use this to report progress or post the PR link.",
+    description: "Add a comment to a Jira issue. Use this to report progress or post the PR link.",
     schema: z.object({
       issueKey: z.string().describe("The Jira issue key, e.g. 'PROJ-123'."),
       comment: z.string().describe("Comment body (plain text)."),

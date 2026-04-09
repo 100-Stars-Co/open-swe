@@ -32,9 +32,7 @@ export interface JiraCommentContext {
  */
 export function generateThreadIdFromJiraIssue(issueKey: string): string {
   const baseUrl = process.env.JIRA_BASE_URL ?? "";
-  const hash = createHash("sha256")
-    .update(`${baseUrl}:${issueKey}`)
-    .digest("hex");
+  const hash = createHash("sha256").update(`${baseUrl}:${issueKey}`).digest("hex");
   return formatAsUuid(hash);
 }
 
@@ -44,8 +42,8 @@ function formatAsUuid(hex: string): string {
   return [
     h.slice(0, 8),
     h.slice(8, 12),
-    "4" + h.slice(13, 16), // version 4
-    ((parseInt(h[16], 16) & 0x3) | 0x8).toString(16) + h.slice(17, 20), // variant
+    `4${h.slice(13, 16)}`, // version 4
+    ((Number.parseInt(h[16], 16) & 0x3) | 0x8).toString(16) + h.slice(17, 20), // variant
     h.slice(20, 32),
   ].join("-");
 }

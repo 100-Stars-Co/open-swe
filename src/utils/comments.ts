@@ -24,7 +24,7 @@ function runUrl(runId: string): string {
  */
 export function truncate(text: string, maxLength = 1000): string {
   if (text.length <= maxLength) return text;
-  return text.slice(0, maxLength - 3) + "...";
+  return `${text.slice(0, maxLength - 3)}...`;
 }
 
 /**

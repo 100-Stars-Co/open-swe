@@ -6,8 +6,8 @@
  * would stall. This middleware injects a no_op tool call to keep the loop alive.
  */
 
-import { createMiddleware } from "langchain";
 import { AIMessage, ToolMessage } from "@langchain/core/messages";
+import { createMiddleware } from "langchain";
 
 export const ensureNoEmptyMsgMiddleware = createMiddleware({
   name: "EnsureNoEmptyMsg",
@@ -22,8 +22,7 @@ export const ensureNoEmptyMsgMiddleware = createMiddleware({
         ? lastMessage.content.trim().length > 0
         : (lastMessage.content as unknown[]).length > 0;
 
-    const hasToolCalls =
-      Array.isArray(lastMessage.tool_calls) && lastMessage.tool_calls.length > 0;
+    const hasToolCalls = Array.isArray(lastMessage.tool_calls) && lastMessage.tool_calls.length > 0;
 
     if (!hasContent && !hasToolCalls) {
       // Inject a no_op tool call to keep the loop running
@@ -41,17 +40,14 @@ export const ensureNoEmptyMsgMiddleware = createMiddleware({
       });
 
       const toolResponseMessage = new ToolMessage({
-        content: "Please continue with the task, ensuring you ALWAYS call at least one tool per turn.",
+        content:
+          "Please continue with the task, ensuring you ALWAYS call at least one tool per turn.",
         tool_call_id: noOpId,
         name: "no_op",
       });
 
       return {
-        messages: [
-          ...messages.slice(0, -1),
-          updatedMessage,
-          toolResponseMessage,
-        ],
+        messages: [...messages.slice(0, -1), updatedMessage, toolResponseMessage],
       };
     }
 

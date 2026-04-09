@@ -10,7 +10,14 @@ import { updateIssue } from "../utils/jira.js";
 export const jiraUpdateIssue = tool(
   async ({ issueKey, summary, description, priority, assignee, labels }) => {
     try {
-      await updateIssue({ issueKey, summary, description, priority, assignee, labels });
+      await updateIssue({
+        issueKey,
+        summary,
+        description,
+        priority,
+        assignee,
+        labels,
+      });
       return JSON.stringify({ success: true });
     } catch (err) {
       return JSON.stringify({ error: String(err), status: "error" });

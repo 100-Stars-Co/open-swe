@@ -55,9 +55,7 @@ export const fetchUrl = tool(
       const MAX_CHARS = 50_000;
       const truncated = markdownContent.length > MAX_CHARS;
       if (truncated) {
-        markdownContent =
-          markdownContent.slice(0, MAX_CHARS) +
-          "\n\n[Content truncated — use http_request to fetch specific sections]";
+        markdownContent = `${markdownContent.slice(0, MAX_CHARS)}\n\n[Content truncated — use http_request to fetch specific sections]`;
       }
 
       return JSON.stringify({

@@ -6,15 +6,22 @@
  * Signature verification is strict — unverified requests are rejected with 403.
  */
 
-import { serve } from "@hono/node-server";
-import { Hono } from "hono";
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+import { serve } from "@hono/node-server";
 import { Client } from "@langchain/langgraph-sdk";
+import { Hono } from "hono";
 import { queueMessageForThread } from "./middleware/checkMessageQueue.js";
 import {
-  parseJiraIssuePayload,
   parseJiraCommentPayload,
+  parseJiraIssuePayload,
 } from "./utils/jiraWebhook.js";
+import {
+  generateThreadIdFromTelegramChat,
+  getTelegramRepoConfig,
+  isBotMentioned,
+  stripBotMention,
+  verifyTelegramSecret,
+} from "./utils/telegram.js";
 
 const app = new Hono();
 
@@ -31,7 +38,11 @@ function getLangGraphClient(): Client {
 /**
  * Generate a deterministic UUID-formatted thread ID from a GitHub issue.
  */
-function generateGithubThreadId(owner: string, repo: string, issueNumber: number): string {
+function generateGithubThreadId(
+  owner: string,
+  repo: string,
+  issueNumber: number,
+): string {
   const hash = createHash("sha256")
     .update(`github:${owner}/${repo}#${issueNumber}`)
     .digest("hex");
@@ -44,7 +55,7 @@ function formatAsUuid(hex: string): string {
     h.slice(0, 8),
     h.slice(8, 12),
     `4${h.slice(13, 16)}`,
-    `${((parseInt(h[16], 16) & 0x3) | 0x8).toString(16)}${h.slice(17, 20)}`,
+    `${((Number.parseInt(h[16], 16) & 0x3) | 0x8).toString(16)}${h.slice(17, 20)}`,
     h.slice(20, 32),
   ].join("-");
 }
@@ -119,7 +130,10 @@ function jiraSignatureValid(body: Buffer, signature: string | null): boolean {
 function isOrgAllowed(owner: string): boolean {
   const allowList = process.env.ALLOWED_GITHUB_ORGS ?? "";
   if (!allowList.trim()) return true; // Empty = allow all
-  return allowList.split(",").map((s) => s.trim()).includes(owner);
+  return allowList
+    .split(",")
+    .map((s) => s.trim())
+    .includes(owner);
 }
 
 // ─── Health check ─────────────────────────────────────────────────────────────
@@ -154,9 +168,14 @@ app.post("/webhooks/github", async (c) => {
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-async function handleGithubEvent(event: string, payload: Record<string, any>): Promise<void> {
+async function handleGithubEvent(
+  event: string,
+  payload: Record<string, any>,
+): Promise<void> {
   const action = payload.action as string;
-  const repo = payload.repository as { owner: { login: string }; name: string } | undefined;
+  const repo = payload.repository as
+    | { owner: { login: string }; name: string }
+    | undefined;
   if (!repo) return;
 
   const owner = repo.owner.login;
@@ -186,19 +205,26 @@ async function handleGithubEvent(event: string, payload: Record<string, any>): P
       .filter(Boolean)
       .join("\n");
 
-    await createRun(threadId, { message }, {
-      thread_id: threadId,
-      repo: { owner, name: repoName },
-      issue_number: issue.number,
-      source: "github",
-    });
+    await createRun(
+      threadId,
+      { message },
+      {
+        thread_id: threadId,
+        repo: { owner, name: repoName },
+        issue_number: issue.number,
+        source: "github",
+      },
+    );
     return;
   }
 
   // Issue comment containing @mention
   if (event === "issue_comment" && action === "created") {
     const issue = payload.issue as { number: number; pull_request?: unknown };
-    const comment = payload.comment as { body: string; user: { login: string } };
+    const comment = payload.comment as {
+      body: string;
+      user: { login: string };
+    };
 
     // Only handle issue comments, not PR comments via this event
     if (issue.pull_request) return;
@@ -215,12 +241,16 @@ async function handleGithubEvent(event: string, payload: Record<string, any>): P
       await queueMessageForThread(threadId, message);
     } else {
       await ensureThread(threadId);
-      await createRun(threadId, { message }, {
-        thread_id: threadId,
-        repo: { owner, name: repoName },
-        issue_number: issue.number,
-        source: "github",
-      });
+      await createRun(
+        threadId,
+        { message },
+        {
+          thread_id: threadId,
+          repo: { owner, name: repoName },
+          issue_number: issue.number,
+          source: "github",
+        },
+      );
     }
     return;
   }
@@ -228,7 +258,10 @@ async function handleGithubEvent(event: string, payload: Record<string, any>): P
   // PR review comment mentioning the bot
   if (event === "pull_request_review_comment" && action === "created") {
     const pr = payload.pull_request as { number: number };
-    const comment = payload.comment as { body: string; user: { login: string } };
+    const comment = payload.comment as {
+      body: string;
+      user: { login: string };
+    };
 
     const threadId = generateGithubThreadId(owner, repoName, pr.number);
 
@@ -242,12 +275,16 @@ async function handleGithubEvent(event: string, payload: Record<string, any>): P
       await queueMessageForThread(threadId, message);
     } else {
       await ensureThread(threadId);
-      await createRun(threadId, { message }, {
-        thread_id: threadId,
-        repo: { owner, name: repoName },
-        issue_number: pr.number,
-        source: "github",
-      });
+      await createRun(
+        threadId,
+        { message },
+        {
+          thread_id: threadId,
+          repo: { owner, name: repoName },
+          issue_number: pr.number,
+          source: "github",
+        },
+      );
     }
   }
 }
@@ -276,14 +313,17 @@ app.post("/webhooks/jira", async (c) => {
 });
 
 // biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-async function handleJiraEvent(event: string, payload: Record<string, any>): Promise<void> {
-  const repoOwner =
-    process.env.DEFAULT_REPO_OWNER ?? "";
-  const repoName =
-    process.env.DEFAULT_REPO_NAME ?? "";
+async function handleJiraEvent(
+  event: string,
+  payload: Record<string, any>,
+): Promise<void> {
+  const repoOwner = process.env.DEFAULT_REPO_OWNER ?? "";
+  const repoName = process.env.DEFAULT_REPO_NAME ?? "";
 
   if (!repoOwner || !repoName) {
-    console.warn("[jira] DEFAULT_REPO_OWNER / DEFAULT_REPO_NAME not set — skipping run creation");
+    console.warn(
+      "[jira] DEFAULT_REPO_OWNER / DEFAULT_REPO_NAME not set — skipping run creation",
+    );
     return;
   }
 
@@ -302,13 +342,17 @@ async function handleJiraEvent(event: string, payload: Record<string, any>): Pro
       .filter(Boolean)
       .join("\n");
 
-    await createRun(ctx.threadId, { message }, {
-      thread_id: ctx.threadId,
-      repo: { owner: repoOwner, name: repoName },
-      source: "jira",
-      jira_project_key: ctx.projectKey,
-      jira_issue_key: ctx.issueKey,
-    });
+    await createRun(
+      ctx.threadId,
+      { message },
+      {
+        thread_id: ctx.threadId,
+        repo: { owner: repoOwner, name: repoName },
+        source: "jira",
+        jira_project_key: ctx.projectKey,
+        jira_issue_key: ctx.issueKey,
+      },
+    );
     return;
   }
 
@@ -326,23 +370,119 @@ async function handleJiraEvent(event: string, payload: Record<string, any>): Pro
       await queueMessageForThread(ctx.threadId, message);
     } else {
       await ensureThread(ctx.threadId);
-      await createRun(ctx.threadId, { message }, {
-        thread_id: ctx.threadId,
-        repo: { owner: repoOwner, name: repoName },
-        source: "jira",
-        jira_issue_key: ctx.issueKey,
-      });
+      await createRun(
+        ctx.threadId,
+        { message },
+        {
+          thread_id: ctx.threadId,
+          repo: { owner: repoOwner, name: repoName },
+          source: "jira",
+          jira_issue_key: ctx.issueKey,
+        },
+      );
     }
+  }
+}
+
+// ─── Telegram webhooks ────────────────────────────────────────────────────────
+
+app.get("/webhooks/telegram", (c) => c.json({ ok: true }));
+
+app.post("/webhooks/telegram", async (c) => {
+  const rawBody = Buffer.from(await c.req.arrayBuffer());
+  const secretToken = c.req.header("x-telegram-bot-api-secret-token") ?? "";
+  const webhookSecret = process.env.TELEGRAM_WEBHOOK_SECRET ?? "";
+
+  if (!verifyTelegramSecret(secretToken, webhookSecret)) {
+    return c.json({ error: "Invalid secret token" }, 403);
+  }
+
+  // biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
+  const payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, any>;
+
+  handleTelegramUpdate(payload).catch((err) => {
+    console.error("[telegram webhook] Error:", err);
+  });
+
+  return c.json({ ok: true });
+});
+
+// biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
+async function handleTelegramUpdate(
+  update: Record<string, any>,
+): Promise<void> {
+  const message = update.message as Record<string, unknown> | undefined;
+  if (!message) return;
+
+  const text = (message.text as string) ?? "";
+  const chatId = (message.chat as Record<string, unknown>)?.id as
+    | number
+    | undefined;
+  const messageId = message.message_id as number | undefined;
+  const messageThreadId = (message.message_thread_id as number) ?? undefined;
+  const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "";
+
+  if (!chatId || !text) return;
+
+  // Only respond to messages that mention the bot (in groups) or all messages in private chats
+  const chatType = (message.chat as Record<string, unknown>)?.type as string;
+  if (
+    chatType !== "private" &&
+    botUsername &&
+    !isBotMentioned(text, botUsername)
+  ) {
+    return;
+  }
+
+  const cleanText = stripBotMention(text, botUsername);
+  if (!cleanText.trim()) return;
+
+  const repoConfig = getTelegramRepoConfig(cleanText);
+  if (!repoConfig.owner || !repoConfig.name) {
+    console.warn("[telegram] No repo config found — skipping");
+    return;
+  }
+
+  const threadId = generateThreadIdFromTelegramChat(chatId, messageThreadId);
+  const senderName =
+    ((message.from as Record<string, unknown>)?.first_name as string) ?? "User";
+
+  await ensureThread(threadId);
+
+  const agentMessage = [`Telegram message from ${senderName}:`, cleanText]
+    .filter(Boolean)
+    .join("\n");
+
+  const active = await isThreadActive(threadId);
+  if (active) {
+    await queueMessageForThread(threadId, agentMessage);
+  } else {
+    await createRun(
+      threadId,
+      { message: agentMessage },
+      {
+        thread_id: threadId,
+        repo: { owner: repoConfig.owner, name: repoConfig.name },
+        source: "telegram",
+        telegram_chat: {
+          chat_id: chatId,
+          reply_to_message_id: messageId,
+          message_thread_id: messageThreadId,
+        },
+      },
+    );
   }
 }
 
 // ─── Server ────────────────────────────────────────────────────────────────────
 
-const PORT = parseInt(process.env.PORT ?? "8000", 10);
+const PORT = Number.parseInt(process.env.PORT ?? "8000", 10);
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
-    console.log(`[openswe-js] Webhook server running at http://localhost:${info.port}`);
+    console.log(
+      `[openswe-js] Webhook server running at http://localhost:${info.port}`,
+    );
   });
 }
 

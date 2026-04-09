@@ -1,25 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { generateThreadIdFromJiraIssue } from "../src/utils/jiraWebhook.js";
 
 // Use crypto directly to generate a GitHub thread ID for testing
 import { createHash } from "node:crypto";
 
 function generateGithubThreadId(owner: string, repo: string, issueNumber: number): string {
-  const hash = createHash("sha256")
-    .update(`github:${owner}/${repo}#${issueNumber}`)
-    .digest("hex");
+  const hash = createHash("sha256").update(`github:${owner}/${repo}#${issueNumber}`).digest("hex");
   const h = hash.slice(0, 32);
   return [
     h.slice(0, 8),
     h.slice(8, 12),
     `4${h.slice(13, 16)}`,
-    `${((parseInt(h[16], 16) & 0x3) | 0x8).toString(16)}${h.slice(17, 20)}`,
+    `${((Number.parseInt(h[16], 16) & 0x3) | 0x8).toString(16)}${h.slice(17, 20)}`,
     h.slice(20, 32),
   ].join("-");
 }
 
-const UUID_PATTERN =
-  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe("thread ID generation", () => {
   let originalJiraBaseUrl: string | undefined;

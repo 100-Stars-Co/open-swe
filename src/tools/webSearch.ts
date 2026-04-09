@@ -29,7 +29,10 @@ export const webSearch = tool(
   async ({ query, numResults = 5, includeContents = true }) => {
     const apiKey = process.env.EXA_API_KEY;
     if (!apiKey) {
-      return JSON.stringify({ error: "EXA_API_KEY not configured", status: "error" });
+      return JSON.stringify({
+        error: "EXA_API_KEY not configured",
+        status: "error",
+      });
     }
 
     try {

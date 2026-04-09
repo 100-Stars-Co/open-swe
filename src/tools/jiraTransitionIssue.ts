@@ -24,10 +24,7 @@ export const jiraTransitionIssue = tool(
     schema: z.object({
       issueKey: z.string().describe("The Jira issue key, e.g. 'PROJ-123'."),
       transitionId: z.string().describe("The transition ID from jira_get_transitions."),
-      comment: z
-        .string()
-        .optional()
-        .describe("Optional comment to add when transitioning."),
+      comment: z.string().optional().describe("Optional comment to add when transitioning."),
     }),
   },
 );

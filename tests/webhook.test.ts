@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { createHmac } from "node:crypto";
 import { app } from "../src/webapp.js";
 
@@ -64,7 +64,10 @@ describe("webhook signature verification", () => {
     });
 
     it("returns 200 for request with correct signature", async () => {
-      const payload = JSON.stringify({ action: "opened", repository: { owner: { login: "test" }, name: "repo" } });
+      const payload = JSON.stringify({
+        action: "opened",
+        repository: { owner: { login: "test" }, name: "repo" },
+      });
       const sig = makeGithubSignature(payload);
       const res = await app.request("/webhooks/github", {
         method: "POST",

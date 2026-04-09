@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, afterEach } from "bun:test";
-import { encryptToken, decryptToken, EncryptionKeyMissingError } from "../src/encryption.js";
+import { afterEach, beforeEach, describe, expect, it } from "bun:test";
 import { randomBytes } from "node:crypto";
+import { EncryptionKeyMissingError, decryptToken, encryptToken } from "../src/encryption.js";
 
 describe("encryption", () => {
   let originalKey: string | undefined;
@@ -52,7 +52,7 @@ describe("encryption", () => {
   });
 
   it("throws EncryptionKeyMissingError when TOKEN_ENCRYPTION_KEY is not set", () => {
-    delete process.env.TOKEN_ENCRYPTION_KEY;
+    process.env.TOKEN_ENCRYPTION_KEY = undefined;
     expect(() => encryptToken("anything")).toThrow(EncryptionKeyMissingError);
   });
 

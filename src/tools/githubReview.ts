@@ -4,8 +4,8 @@
  * Mirrors agent/tools/github_review.py
  */
 
-import { tool } from "@langchain/core/tools";
 import type { RunnableConfig } from "@langchain/core/runnables";
+import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 import { resolveGithubToken } from "../utils/auth.js";
 
@@ -37,12 +37,16 @@ export const listPrReviews = tool(
       { headers: githubHeaders(token) },
     );
     const data = await resp.json();
-    return JSON.stringify(resp.ok ? { success: true, reviews: data } : { error: data, status: "error" });
+    return JSON.stringify(
+      resp.ok ? { success: true, reviews: data } : { error: data, status: "error" },
+    );
   },
   {
     name: "list_pr_reviews",
     description: "List all reviews on a pull request.",
-    schema: z.object({ prNumber: z.number().int().describe("The pull request number.") }),
+    schema: z.object({
+      prNumber: z.number().int().describe("The pull request number."),
+    }),
   },
 );
 
@@ -56,7 +60,9 @@ export const getPrReview = tool(
       { headers: githubHeaders(token) },
     );
     const data = await resp.json();
-    return JSON.stringify(resp.ok ? { success: true, review: data } : { error: data, status: "error" });
+    return JSON.stringify(
+      resp.ok ? { success: true, review: data } : { error: data, status: "error" },
+    );
   },
   {
     name: "get_pr_review",
@@ -77,12 +83,17 @@ export const createPrReview = tool(
       `${GITHUB_API_BASE}/repos/${repo.owner}/${repo.name}/pulls/${prNumber}/reviews`,
       {
         method: "POST",
-        headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+        headers: {
+          ...githubHeaders(token),
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ body, event }),
       },
     );
     const data = await resp.json();
-    return JSON.stringify(resp.ok ? { success: true, review: data } : { error: data, status: "error" });
+    return JSON.stringify(
+      resp.ok ? { success: true, review: data } : { error: data, status: "error" },
+    );
   },
   {
     name: "create_pr_review",
@@ -106,12 +117,17 @@ export const submitPrReview = tool(
       `${GITHUB_API_BASE}/repos/${repo.owner}/${repo.name}/pulls/${prNumber}/reviews/${reviewId}/events`,
       {
         method: "POST",
-        headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+        headers: {
+          ...githubHeaders(token),
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ body, event }),
       },
     );
     const data = await resp.json();
-    return JSON.stringify(resp.ok ? { success: true, review: data } : { error: data, status: "error" });
+    return JSON.stringify(
+      resp.ok ? { success: true, review: data } : { error: data, status: "error" },
+    );
   },
   {
     name: "submit_pr_review",
@@ -120,9 +136,7 @@ export const submitPrReview = tool(
       prNumber: z.number().int().describe("The pull request number."),
       reviewId: z.number().int().describe("The review ID to submit."),
       body: z.string().describe("The review body."),
-      event: z
-        .enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"])
-        .describe("The submit event type."),
+      event: z.enum(["APPROVE", "REQUEST_CHANGES", "COMMENT"]).describe("The submit event type."),
     }),
   },
 );
@@ -136,7 +150,10 @@ export const dismissPrReview = tool(
       `${GITHUB_API_BASE}/repos/${repo.owner}/${repo.name}/pulls/${prNumber}/reviews/${reviewId}/dismissals`,
       {
         method: "PUT",
-        headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+        headers: {
+          ...githubHeaders(token),
+          "Content-Type": "application/json",
+        },
         body: JSON.stringify({ message }),
       },
     );
@@ -164,11 +181,15 @@ export const listPrReviewComments = tool(
       { headers: githubHeaders(token) },
     );
     const data = await resp.json();
-    return JSON.stringify(resp.ok ? { success: true, comments: data } : { error: data, status: "error" });
+    return JSON.stringify(
+      resp.ok ? { success: true, comments: data } : { error: data, status: "error" },
+    );
   },
   {
     name: "list_pr_review_comments",
     description: "List all inline review comments on a pull request.",
-    schema: z.object({ prNumber: z.number().int().describe("The pull request number.") }),
+    schema: z.object({
+      prNumber: z.number().int().describe("The pull request number."),
+    }),
   },
 );

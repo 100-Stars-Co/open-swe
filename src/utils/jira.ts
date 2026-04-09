@@ -20,14 +20,14 @@ function jiraBaseUrl(): string {
   return url.replace(/\/$/, "");
 }
 
-async function jiraRequest<T>(
-  path: string,
-  options: RequestInit = {},
-): Promise<T> {
+async function jiraRequest<T>(path: string, options: RequestInit = {}): Promise<T> {
   const url = `${jiraBaseUrl()}/rest/api/3${path}`;
   const resp = await fetch(url, {
     ...options,
-    headers: { ...jiraHeaders(), ...(options.headers as Record<string, string>) },
+    headers: {
+      ...jiraHeaders(),
+      ...(options.headers as Record<string, string>),
+    },
   });
 
   if (!resp.ok) {
@@ -60,8 +60,15 @@ export interface CreateIssueParams {
 }
 
 export async function createIssue(params: CreateIssueParams): Promise<Record<string, unknown>> {
-  const { projectKey, summary, description, issueType = "Task", priority, assignee, labels } =
-    params;
+  const {
+    projectKey,
+    summary,
+    description,
+    issueType = "Task",
+    priority,
+    assignee,
+    labels,
+  } = params;
 
   const fields: Record<string, unknown> = {
     project: { key: projectKey },
@@ -117,7 +124,10 @@ export async function updateIssue(params: UpdateIssueParams): Promise<Record<str
   });
 }
 
-export async function addComment(issueKey: string, comment: string): Promise<Record<string, unknown>> {
+export async function addComment(
+  issueKey: string,
+  comment: string,
+): Promise<Record<string, unknown>> {
   return jiraRequest(`/issue/${encodeURIComponent(issueKey)}/comment`, {
     method: "POST",
     body: JSON.stringify({
@@ -148,7 +158,12 @@ export async function transitionIssue(
             body: {
               type: "doc",
               version: 1,
-              content: [{ type: "paragraph", content: [{ type: "text", text: comment }] }],
+              content: [
+                {
+                  type: "paragraph",
+                  content: [{ type: "text", text: comment }],
+                },
+              ],
             },
           },
         },

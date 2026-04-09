@@ -7,8 +7,8 @@
  * the error and self-correct or retry.
  */
 
-import { createMiddleware } from "langchain";
 import { ToolMessage } from "@langchain/core/messages";
+import { createMiddleware } from "langchain";
 
 export const toolErrorHandlerMiddleware = createMiddleware({
   name: "ToolErrorHandler",

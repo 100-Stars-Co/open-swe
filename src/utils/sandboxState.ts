@@ -60,7 +60,12 @@ export async function getSandboxMetadata(threadId: string): Promise<SandboxMetad
       baseBranch: (meta[METADATA_KEY_BASE_BRANCH] as string) ?? null,
     };
   } catch {
-    return { sandboxId: null, repoDir: null, branchName: null, baseBranch: null };
+    return {
+      sandboxId: null,
+      repoDir: null,
+      branchName: null,
+      baseBranch: null,
+    };
   }
 }
 

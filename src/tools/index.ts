@@ -18,3 +18,10 @@ export { jiraUpdateIssue } from "./jiraUpdateIssue.js";
 export { jiraAddComment } from "./jiraAddComment.js";
 export { jiraGetTransitions } from "./jiraGetTransitions.js";
 export { jiraTransitionIssue } from "./jiraTransitionIssue.js";
+export { telegramReply } from "./telegramReply.js";
+export {
+  figmaGetFile,
+  figmaGetComponent,
+  figmaExportImage,
+} from "./figmaMcp.js";
+export { verifyPrTool } from "./verifyPr.js";

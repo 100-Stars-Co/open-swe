@@ -5,7 +5,7 @@
  * All git operations run inside the sandbox via execute().
  */
 
-import { type SandboxBackendProtocol } from "deepagents";
+import type { SandboxBackendProtocol } from "deepagents";
 
 const GITHUB_API_BASE = "https://api.github.com";
 const HTTP_CREATED = 201;
@@ -50,9 +50,7 @@ export async function isValidGitRepo(
   sandbox: SandboxBackendProtocol,
   repoDir: string,
 ): Promise<boolean> {
-  const result = await sandbox.execute(
-    `test -d ${shellQuote(repoDir + "/.git")} && echo exists`,
-  );
+  const result = await sandbox.execute(`test -d ${shellQuote(`${repoDir}/.git`)} && echo exists`);
   return result.exitCode === 0 && result.output.includes("exists");
 }
 
@@ -120,11 +118,7 @@ export async function gitCheckoutBranch(
   const existing = await runGit(sandbox, repoDir, `git checkout ${shellQuote(branch)} 2>&1`);
   if (existing.exitCode === 0) return true;
 
-  const create = await runGit(
-    sandbox,
-    repoDir,
-    `git checkout -b ${shellQuote(branch)} 2>&1`,
-  );
+  const create = await runGit(sandbox, repoDir, `git checkout -b ${shellQuote(branch)} 2>&1`);
   return create.exitCode === 0;
 }
 
@@ -170,11 +164,7 @@ export async function gitPush(
   repo: string,
 ): Promise<ExecuteResult> {
   const remote = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
-  return runGit(
-    sandbox,
-    repoDir,
-    `git push ${shellQuote(remote)} HEAD:${shellQuote(branch)} 2>&1`,
-  );
+  return runGit(sandbox, repoDir, `git push ${shellQuote(remote)} HEAD:${shellQuote(branch)} 2>&1`);
 }
 
 export async function setupGitCredentials(
@@ -283,12 +273,9 @@ export async function addReactionToComment(
   reaction: string,
   token: string,
 ): Promise<void> {
-  await fetch(
-    `${GITHUB_API_BASE}/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`,
-    {
-      method: "POST",
-      headers: { ...githubHeaders(token), "Content-Type": "application/json" },
-      body: JSON.stringify({ content: reaction }),
-    },
-  );
+  await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/issues/comments/${commentId}/reactions`, {
+    method: "POST",
+    headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ content: reaction }),
+  });
 }

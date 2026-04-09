@@ -9,55 +9,64 @@
 
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { createDeepAgent } from "deepagents";
-import { resolveGithubToken, persistEncryptedGithubToken } from "./utils/auth.js";
-import { readAgentsMd } from "./utils/agentsMd.js";
 import {
-  getSandboxBackend,
-  setSandboxBackend,
-  getSandboxMetadata,
-  setSandboxMetadata,
-  waitForSandboxId,
-  SANDBOX_CREATING,
-} from "./utils/sandboxState.js";
-import { createSandbox } from "./utils/sandbox.js";
-import {
-  isValidGitRepo,
-  removeDirectory,
-  setupGitCredentials,
-  cleanupGitCredentials,
-  gitFetchOrigin,
-  gitPullBranch,
-  gitCurrentBranch,
-  gitCheckoutBranch,
-} from "./utils/github.js";
+  checkMessageQueueMiddleware,
+  cleanupSandboxMiddleware,
+  ensureNoEmptyMsgMiddleware,
+  openPrIfNeededMiddleware,
+  toolErrorHandlerMiddleware,
+  verifyPrAfterAgentMiddleware,
+} from "./middleware/index.js";
 import { constructSystemPrompt } from "./prompt.js";
 import {
   commitAndOpenPr,
-  fetchUrl,
-  httpRequest,
-  webSearch,
-  githubComment,
-  listPrReviews,
-  getPrReview,
   createPrReview,
-  submitPrReview,
   dismissPrReview,
-  listPrReviewComments,
-  jiraGetIssue,
-  jiraSearchIssues,
-  jiraCreateIssue,
-  jiraUpdateIssue,
+  fetchUrl,
+  figmaExportImage,
+  figmaGetComponent,
+  figmaGetFile,
+  getPrReview,
+  githubComment,
+  httpRequest,
   jiraAddComment,
+  jiraCreateIssue,
+  jiraGetIssue,
   jiraGetTransitions,
+  jiraSearchIssues,
   jiraTransitionIssue,
+  jiraUpdateIssue,
+  listPrReviewComments,
+  listPrReviews,
+  submitPrReview,
+  telegramReply,
+  verifyPrTool,
+  webSearch,
 } from "./tools/index.js";
+import { readAgentsMd } from "./utils/agentsMd.js";
 import {
-  toolErrorHandlerMiddleware,
-  checkMessageQueueMiddleware,
-  ensureNoEmptyMsgMiddleware,
-  openPrIfNeededMiddleware,
-  cleanupSandboxMiddleware,
-} from "./middleware/index.js";
+  persistEncryptedGithubToken,
+  resolveGithubToken,
+} from "./utils/auth.js";
+import {
+  cleanupGitCredentials,
+  gitCheckoutBranch,
+  gitCurrentBranch,
+  gitFetchOrigin,
+  gitPullBranch,
+  isValidGitRepo,
+  removeDirectory,
+  setupGitCredentials,
+} from "./utils/github.js";
+import { createSandbox } from "./utils/sandbox.js";
+import {
+  SANDBOX_CREATING,
+  getSandboxBackend,
+  getSandboxMetadata,
+  setSandboxBackend,
+  setSandboxMetadata,
+  waitForSandboxId,
+} from "./utils/sandboxState.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -95,9 +104,12 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
   const configurable = (config.configurable ?? {}) as AgentConfigurable;
   const { thread_id: threadId, repo, base_branch: baseBranch } = configurable;
 
-  if (!threadId) throw new Error("thread_id is required in config.configurable");
+  if (!threadId)
+    throw new Error("thread_id is required in config.configurable");
   if (!repo?.owner || !repo?.name) {
-    throw new Error("repo.owner and repo.name are required in config.configurable");
+    throw new Error(
+      "repo.owner and repo.name are required in config.configurable",
+    );
   }
 
   // 1. Resolve GitHub token
@@ -151,7 +163,17 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
     jiraAddComment,
     jiraGetTransitions,
     jiraTransitionIssue,
+    // Telegram
+    telegramReply,
+    // Verification
+    verifyPrTool,
   ];
+
+  // Figma tools — only include if FIGMA_API_KEY is set
+  if (process.env.FIGMA_API_KEY) {
+    // biome-ignore lint/suspicious/noExplicitAny: figma tools have different schemas
+    (tools as any[]).push(figmaGetFile, figmaGetComponent, figmaExportImage);
+  }
 
   // 8. Middleware stack
   const middleware = [
@@ -159,6 +181,7 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
     checkMessageQueueMiddleware,
     ensureNoEmptyMsgMiddleware,
     openPrIfNeededMiddleware,
+    verifyPrAfterAgentMiddleware,
     cleanupSandboxMiddleware,
   ];
 
@@ -190,7 +213,9 @@ async function getOrCreateSandbox(threadId: string) {
     // Another invocation is creating the sandbox — wait for it
     sandboxId = await waitForSandboxId(threadId, SANDBOX_CREATION_TIMEOUT_MS);
     if (!sandboxId) {
-      throw new Error("Timed out waiting for sandbox to be created by concurrent invocation");
+      throw new Error(
+        "Timed out waiting for sandbox to be created by concurrent invocation",
+      );
     }
   }
 

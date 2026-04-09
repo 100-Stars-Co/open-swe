@@ -14,14 +14,14 @@
  */
 
 import type {
-  SandboxBackendProtocol,
   ExecuteResponse,
-  WriteResult,
-  FileInfo,
-  GrepMatch,
   FileDownloadResponse,
-  FileUploadResponse,
+  FileInfo,
   FileOperationError,
+  FileUploadResponse,
+  GrepMatch,
+  SandboxBackendProtocol,
+  WriteResult,
 } from "deepagents";
 
 const DEFAULT_OPENSANDBOX_URL = "http://localhost:9000";
@@ -35,8 +35,8 @@ function resolveTimeout(timeout?: number): number {
   if (timeout !== undefined) return timeout;
   const env = process.env.OPENSANDBOX_TIMEOUT ?? process.env.SANDBOX_TIMEOUT;
   if (env) {
-    const n = parseInt(env, 10);
-    if (!isNaN(n)) return n;
+    const n = Number.parseInt(env, 10);
+    if (!Number.isNaN(n)) return n;
   }
   return DEFAULT_OPENSANDBOX_TIMEOUT;
 }
@@ -65,7 +65,7 @@ async function checkServerReachable(serverUrl: string): Promise<void> {
   try {
     const u = new URL(serverUrl);
     host = u.hostname;
-    port = parseInt(u.port || "9000", 10);
+    port = Number.parseInt(u.port || "9000", 10);
   } catch {
     // keep defaults
   }
@@ -79,9 +79,7 @@ async function checkServerReachable(serverUrl: string): Promise<void> {
     socket.on("error", (err: Error) => {
       reject(
         new Error(
-          `OpenSandbox server is not reachable at ${serverUrl} (host=${host}, port=${port}). ` +
-            `Ensure the server is running and OPENSANDBOX_URL is set correctly. ` +
-            `Original error: ${err.message}`,
+          `OpenSandbox server is not reachable at ${serverUrl} (host=${host}, port=${port}). Ensure the server is running and OPENSANDBOX_URL is set correctly. Original error: ${err.message}`,
         ),
       );
     });
@@ -180,7 +178,11 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
       // Use the SDK's file write if available
       if (this._sandbox?.files?.write_files) {
         await this._sandbox.files.write_files([
-          { path: filePath, data: new TextEncoder().encode(content), mode: 0o644 },
+          {
+            path: filePath,
+            data: new TextEncoder().encode(content),
+            mode: 0o644,
+          },
         ]);
         return { path: filePath, error: undefined };
       }
@@ -206,12 +208,16 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
     oldString: string,
     newString: string,
     replaceAll = false,
-  // biome-ignore lint/suspicious/noExplicitAny: EditResult from deepagents
+    // biome-ignore lint/suspicious/noExplicitAny: EditResult from deepagents
   ): Promise<any> {
     const content = await this.read(filePath);
     const occurrences = content.split(oldString).length - 1;
     if (occurrences === 0) {
-      return { error: `String not found in ${filePath}`, path: filePath, occurrences: 0 };
+      return {
+        error: `String not found in ${filePath}`,
+        path: filePath,
+        occurrences: 0,
+      };
     }
     const updated = replaceAll
       ? content.split(oldString).join(newString)
@@ -239,7 +245,7 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
         const isDir = line.startsWith("d");
         return {
           path: `${path.replace(/\/$/, "")}/${name}${isDir ? "/" : ""}`,
-          size: parseInt(parts[4] ?? "0", 10) || 0,
+          size: Number.parseInt(parts[4] ?? "0", 10) || 0,
           is_dir: isDir,
         } satisfies FileInfo;
       });
@@ -264,7 +270,7 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
         const [file, lineNum, ...rest] = line.split(":");
         return {
           path: file ?? "",
-          line: parseInt(lineNum ?? "0", 10),
+          line: Number.parseInt(lineNum ?? "0", 10),
           text: rest.join(":"),
         } satisfies GrepMatch;
       });
@@ -297,27 +303,42 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
             const content = await this._sandbox.files.read_file(p);
             return {
               path: p,
-              content: typeof content === "string" ? new TextEncoder().encode(content) : content,
+              content:
+                typeof content === "string"
+                  ? new TextEncoder().encode(content)
+                  : content,
               error: null,
             } satisfies FileDownloadResponse;
           }
           const result = await this.read(p);
-          return { path: p, content: new TextEncoder().encode(result), error: null } satisfies FileDownloadResponse;
+          return {
+            path: p,
+            content: new TextEncoder().encode(result),
+            error: null,
+          } satisfies FileDownloadResponse;
         } catch {
-          return { path: p, content: null, error: "file_not_found" as FileOperationError } satisfies FileDownloadResponse;
+          return {
+            path: p,
+            content: null,
+            error: "file_not_found" as FileOperationError,
+          } satisfies FileDownloadResponse;
         }
       }),
     );
   }
 
-  async uploadFiles(files: Array<[string, Uint8Array]>): Promise<FileUploadResponse[]> {
+  async uploadFiles(
+    files: Array<[string, Uint8Array]>,
+  ): Promise<FileUploadResponse[]> {
     return Promise.all(
       files.map(async ([path, data]) => {
         const content = new TextDecoder().decode(data);
         const result = await this.write(path, content);
         return {
           path,
-          error: result.error ? ("permission_denied" as FileOperationError) : null,
+          error: result.error
+            ? ("permission_denied" as FileOperationError)
+            : null,
         } satisfies FileUploadResponse;
       }),
     );
@@ -333,6 +354,7 @@ export async function createOpenSandbox(
   sandboxId?: string,
   timeout?: number,
 ): Promise<SandboxBackendProtocol> {
+  // biome-ignore lint/complexity/noBannedTypes: dynamic import from optional peer dep has unknown shape
   let Sandbox: { create: Function; connect: Function };
   // biome-ignore lint/suspicious/noExplicitAny: dynamic import
   let ConnectionConfig: any;
@@ -350,7 +372,8 @@ export async function createOpenSandbox(
   }
 
   const serverUrl = process.env.OPENSANDBOX_URL ?? DEFAULT_OPENSANDBOX_URL;
-  const template = process.env.OPENSANDBOX_TEMPLATE ?? DEFAULT_OPENSANDBOX_TEMPLATE;
+  const template =
+    process.env.OPENSANDBOX_TEMPLATE ?? DEFAULT_OPENSANDBOX_TEMPLATE;
   const resolvedTimeout = resolveTimeout(timeout);
   const envs = buildSandboxEnvs();
 
@@ -358,13 +381,18 @@ export async function createOpenSandbox(
   await checkServerReachable(serverUrl);
 
   const domain = parseServerDomain(serverUrl);
-  const connectionConfig = new ConnectionConfig({ domain, useServerProxy: true });
+  const connectionConfig = new ConnectionConfig({
+    domain,
+    useServerProxy: true,
+  });
 
   // biome-ignore lint/suspicious/noExplicitAny: dynamic SDK
   let rawSandbox: any;
 
   if (sandboxId) {
-    rawSandbox = await Sandbox.connect(sandboxId, { connection_config: connectionConfig });
+    rawSandbox = await Sandbox.connect(sandboxId, {
+      connection_config: connectionConfig,
+    });
   } else {
     const denyEgress = ["1", "true", "yes"].includes(
       (process.env.OPENSANDBOX_DENY_EGRESS ?? "").toLowerCase(),
@@ -387,7 +415,10 @@ export async function createOpenSandbox(
     rawSandbox = await Sandbox.create(createOpts);
   }
 
-  return new OpenSandboxBackend(rawSandbox, resolvedTimeout) as unknown as SandboxBackendProtocol;
+  return new OpenSandboxBackend(
+    rawSandbox,
+    resolvedTimeout,
+  ) as unknown as SandboxBackendProtocol;
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────

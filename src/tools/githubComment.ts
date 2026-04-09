@@ -3,16 +3,14 @@
  * Mirrors agent/tools/github_comment.py
  */
 
-import { tool } from "@langchain/core/tools";
 import type { RunnableConfig } from "@langchain/core/runnables";
+import { tool } from "@langchain/core/tools";
 import { z } from "zod";
-import { postGithubComment } from "../utils/github.js";
 import { resolveGithubToken } from "../utils/auth.js";
+import { postGithubComment } from "../utils/github.js";
 
 const schema = z.object({
-  message: z
-    .string()
-    .describe("The comment body. Markdown is supported."),
+  message: z.string().describe("The comment body. Markdown is supported."),
   issueNumber: z
     .number()
     .int()

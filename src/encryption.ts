@@ -29,8 +29,7 @@ function getEncryptionKey(): Buffer {
   const key = Buffer.from(raw, "base64");
   if (key.length !== 32) {
     throw new Error(
-      `TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (got ${key.length}). ` +
-        "Re-generate with: node -e \"const c=require('crypto');console.log(c.randomBytes(32).toString('base64'))\"",
+      `TOKEN_ENCRYPTION_KEY must decode to exactly 32 bytes (got ${key.length}). Re-generate with: node -e \"const c=require('crypto');console.log(c.randomBytes(32).toString('base64'))\"`,
     );
   }
   return key;

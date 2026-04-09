@@ -5,6 +5,7 @@
 
 import type { SandboxBackendProtocol } from "deepagents";
 import { createDaytonaSandbox } from "../integrations/daytona.js";
+import { createE2bSandbox } from "../integrations/e2b.js";
 import { createLocalSandbox } from "../integrations/local.js";
 import { createOpenSandbox } from "../integrations/opensandbox.js";
 
@@ -16,6 +17,7 @@ export type SandboxFactory = (
 export const SANDBOX_FACTORIES: Record<string, SandboxFactory> = {
   daytona: createDaytonaSandbox,
   langsmith: createDaytonaSandbox,
+  e2b: createE2bSandbox,
   opensandbox: createOpenSandbox,
   local: createLocalSandbox,
 };
