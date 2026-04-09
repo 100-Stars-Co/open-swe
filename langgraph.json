@@ -1,12 +1,11 @@
 {
   "$schema": "https://langgra.ph/schema.json",
-  "python_version": "3.12",
+  "node_version": "20",
   "graphs": {
-    "agent": "agent.server:get_agent"
+    "agent": "./src/server.ts:getAgent"
   },
-  "dependencies": ["."],
   "http": {
-    "app": "agent.webapp:app"
+    "app": "./src/webapp.ts:app"
   },
-  "env": ".env" 
+  "env": ".env"
 }
