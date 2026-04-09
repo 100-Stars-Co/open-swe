@@ -33,6 +33,7 @@ from .linear_list_teams import linear_list_teams
 from .linear_update_issue import linear_update_issue
 from .slack_thread_reply import slack_thread_reply
 from .telegram_reply import telegram_reply
+from .verify_pr import verify_pr
 from .web_search import web_search
 
 __all__ = [
@@ -67,5 +68,6 @@ __all__ = [
     "submit_pr_review",
     "telegram_reply",
     "update_pr_review",
+    "verify_pr",
     "web_search",
 ]

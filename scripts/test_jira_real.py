@@ -21,6 +21,7 @@ load_dotenv()
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+# ruff: noqa: E402
 from agent.tools.jira_get_issue import jira_get_issue
 from agent.tools.jira_search_issues import jira_search_issues
 

@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 
 from agent import webapp
@@ -548,3 +549,207 @@ def test_process_github_issue_debug_payload_followup_when_thread_exists(
     assert "## Repository" not in prompt
     # puvanath is trusted so no untrusted wrapping
     assert UNTRUSTED_GITHUB_COMMENT_OPEN_TAG not in prompt
+
+
+# Tests for pull_request webhook events (re-open and bot-created PRs)
+# --------------------------------------------------------------------
+
+
+def test_github_webhook_accepts_pull_request_reopened(monkeypatch) -> None:
+    """Webhook endpoint must accept pull_request reopened events and trigger verification."""
+    captured: dict[str, Any] = {}
+
+    async def fake_process_github_pr_event(payload: dict[str, Any], event_type: str) -> None:
+        captured["payload"] = payload
+        captured["event_type"] = event_type
+
+    monkeypatch.setattr(webapp, "process_github_pr_event", fake_process_github_pr_event)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+
+    payload = {
+        "action": "reopened",
+        "number": 123,
+        "pull_request": {
+            "number": 123,
+            "user": {"login": "octocat", "type": "User"},
+        },
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+    }
+
+    response = _post_github_webhook(client, "pull_request", payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "accepted"
+    assert data["message"] == "Processing pull_request reopened event"
+    assert captured.get("event_type") == "pull_request"
+
+
+def test_github_webhook_accepts_pull_request_opened_by_bot(monkeypatch) -> None:
+    """Webhook endpoint must accept pull_request opened events from bots."""
+    captured: dict[str, Any] = {}
+
+    async def fake_process_github_pr_event(payload: dict[str, Any], event_type: str) -> None:
+        captured["payload"] = payload
+        captured["event_type"] = event_type
+
+    monkeypatch.setattr(webapp, "process_github_pr_event", fake_process_github_pr_event)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+
+    payload = {
+        "action": "opened",
+        "number": 456,
+        "pull_request": {
+            "number": 456,
+            "user": {"login": "open-swe[bot]", "type": "Bot"},
+        },
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+    }
+
+    response = _post_github_webhook(client, "pull_request", payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "accepted"
+    assert data["message"] == "Processing pull_request opened event"
+
+
+def test_github_webhook_ignores_pull_request_closed(monkeypatch) -> None:
+    """Webhook endpoint should ignore pull_request closed events."""
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+
+    payload = {
+        "action": "closed",
+        "number": 789,
+        "pull_request": {
+            "number": 789,
+            "user": {"login": "octocat", "type": "User"},
+        },
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+    }
+
+    response = _post_github_webhook(client, "pull_request", payload)
+
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "ignored"
+    assert "closed" in data["reason"]
+
+
+def test_github_webhook_ignores_user_opened_pr(monkeypatch) -> None:
+    """Webhook endpoint should not trigger verification for user-opened PRs."""
+    captured: dict[str, Any] = {}
+
+    async def fake_process_github_pr_event(payload: dict[str, Any], event_type: str) -> None:
+        captured["called"] = True
+
+    monkeypatch.setattr(webapp, "process_github_pr_event", fake_process_github_pr_event)
+    monkeypatch.setattr(webapp, "GITHUB_WEBHOOK_SECRET", _TEST_WEBHOOK_SECRET)
+
+    client = TestClient(webapp.app)
+
+    # PR opened by a regular user (not a bot)
+    payload = {
+        "action": "opened",
+        "number": 999,
+        "pull_request": {
+            "number": 999,
+            "user": {"login": "regular-user", "type": "User"},
+        },
+        "repository": {"owner": {"login": "langchain-ai"}, "name": "open-swe"},
+    }
+
+    response = _post_github_webhook(client, "pull_request", payload)
+
+    # The webhook should be accepted but process_github_pr_event should skip it
+    assert response.status_code == 200
+    data = response.json()
+    assert data["status"] == "accepted"
+    # The function was called, but it will skip non-bot opened PRs internally
+    assert captured.get("called") is True
+
+
+@pytest.mark.asyncio
+async def test_process_github_pr_event_triggers_on_reopened(monkeypatch) -> None:
+    """process_github_pr_event should trigger verification for reopened PRs."""
+    captured: dict[str, Any] = {}
+
+    def fake_verify_pr(pr_number: int, **kwargs) -> dict:
+        captured["pr_number"] = pr_number
+        captured["repo_config"] = kwargs.get("repo_config")
+        return {"success": True}
+
+    monkeypatch.setattr(webapp, "verify_pr_tool", fake_verify_pr)
+
+    payload = {
+        "action": "reopened",
+        "pull_request": {
+            "number": 123,
+            "user": {"login": "some-user", "type": "User"},
+        },
+        "repository": {"owner": {"login": "test-owner"}, "name": "test-repo"},
+    }
+
+    await webapp.process_github_pr_event(payload, "pull_request")
+
+    assert captured["pr_number"] == 123
+    assert captured["repo_config"] == {"owner": "test-owner", "name": "test-repo"}
+
+
+@pytest.mark.asyncio
+async def test_process_github_pr_event_triggers_on_bot_opened(monkeypatch) -> None:
+    """process_github_pr_event should trigger verification for bot-opened PRs."""
+    captured: dict[str, Any] = {}
+
+    def fake_verify_pr(pr_number: int, **kwargs) -> dict:
+        captured["pr_number"] = pr_number
+        captured["repo_config"] = kwargs.get("repo_config")
+        return {"success": True}
+
+    monkeypatch.setattr(webapp, "verify_pr_tool", fake_verify_pr)
+
+    payload = {
+        "action": "opened",
+        "pull_request": {
+            "number": 456,
+            "user": {"login": "open-swe[bot]", "type": "Bot"},
+        },
+        "repository": {"owner": {"login": "test-owner"}, "name": "test-repo"},
+    }
+
+    await webapp.process_github_pr_event(payload, "pull_request")
+
+    assert captured["pr_number"] == 456
+    assert captured["repo_config"] == {"owner": "test-owner", "name": "test-repo"}
+
+
+@pytest.mark.asyncio
+async def test_process_github_pr_event_skips_user_opened(monkeypatch) -> None:
+    """process_github_pr_event should skip verification for user-opened PRs."""
+    captured: dict[str, Any] = {}
+
+    def fake_verify_pr(pr_number: int, **kwargs) -> dict:
+        captured["called"] = True
+        return {"success": True}
+
+    monkeypatch.setattr(webapp, "verify_pr_tool", fake_verify_pr)
+
+    payload = {
+        "action": "opened",
+        "pull_request": {
+            "number": 789,
+            "user": {"login": "regular-user", "type": "User"},
+        },
+        "repository": {"owner": {"login": "test-owner"}, "name": "test-repo"},
+    }
+
+    await webapp.process_github_pr_event(payload, "pull_request")
+
+    # verify_pr should not be called for user-opened PRs
+    assert captured.get("called") is None

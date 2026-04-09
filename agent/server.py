@@ -73,6 +73,7 @@ from .tools import (
     submit_pr_review,
     telegram_reply,
     update_pr_review,
+    verify_pr,
     web_search,
 )
 from .utils.auth import resolve_github_token
@@ -135,18 +136,12 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
 
     logger.info("Resolved sandbox work dir to %s", work_dir)
 
-    is_git_repo = await loop.run_in_executor(
-        None, is_valid_git_repo, sandbox_backend, repo_dir
-    )
+    is_git_repo = await loop.run_in_executor(None, is_valid_git_repo, sandbox_backend, repo_dir)
 
     if not is_git_repo:
-        logger.warning(
-            "Repo directory missing or not a valid git repo at %s, removing", repo_dir
-        )
+        logger.warning("Repo directory missing or not a valid git repo at %s, removing", repo_dir)
         try:
-            removed = await loop.run_in_executor(
-                None, remove_directory, sandbox_backend, repo_dir
-            )
+            removed = await loop.run_in_executor(None, remove_directory, sandbox_backend, repo_dir)
             if not removed:
                 msg = f"Failed to remove invalid directory at {repo_dir}"
                 logger.error(msg)
@@ -162,9 +157,7 @@ async def _clone_or_pull_repo_in_sandbox(  # noqa: PLR0915
         )
 
         if has_changes:
-            logger.warning(
-                "Repo has uncommitted changes at %s, skipping pull", repo_dir
-            )
+            logger.warning("Repo has uncommitted changes at %s, skipping pull", repo_dir)
             return repo_dir
 
         logger.info("Repo is clean, pulling latest changes from %s/%s", owner, repo)
@@ -298,9 +291,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     repo_name = repo_config.get("name")
 
     if thread_id is None or not graph_loaded_for_execution(config):
-        logger.info(
-            "No thread_id or not for execution, returning agent without sandbox"
-        )
+        logger.info("No thread_id or not for execution, returning agent without sandbox")
         return create_deep_agent(
             system_prompt="",
             tools=[],
@@ -341,9 +332,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     elif sandbox_id is None:
         logger.info("Creating new sandbox for thread %s", thread_id)
-        await client.threads.update(
-            thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING}
-        )
+        await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": SANDBOX_CREATING})
 
         try:
             # Create sandbox without context manager cleanup (sandbox persists)
@@ -364,9 +353,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         except Exception:
             logger.exception("Failed to create sandbox or clone repo")
             try:
-                await client.threads.update(
-                    thread_id=thread_id, metadata={"sandbox_id": None}
-                )
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 logger.info("Reset sandbox_id to None for thread %s", thread_id)
             except Exception:
                 logger.exception("Failed to reset sandbox_id metadata")
@@ -378,9 +365,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             sandbox_backend = await asyncio.to_thread(create_sandbox, sandbox_id)
             logger.info("Connected to existing sandbox %s", sandbox_id)
         except Exception:
-            logger.warning(
-                "Failed to connect to existing sandbox %s, creating new one", sandbox_id
-            )
+            logger.warning("Failed to connect to existing sandbox %s, creating new one", sandbox_id)
             # Reset sandbox_id and create a new sandbox
             await client.threads.update(
                 thread_id=thread_id,
@@ -392,9 +377,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
                 logger.info("New sandbox created: %s", sandbox_backend.id)
             except Exception:
                 logger.exception("Failed to create replacement sandbox")
-                await client.threads.update(
-                    thread_id=thread_id, metadata={"sandbox_id": None}
-                )
+                await client.threads.update(thread_id=thread_id, metadata={"sandbox_id": None})
                 raise
 
         metadata = get_config().get("metadata", {})
@@ -426,9 +409,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
 
     branch_name = get_config().get("metadata", {}).get("branch_name")
     if branch_name:
-        logger.info(
-            "Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id
-        )
+        logger.info("Checking out branch '%s' in sandbox for thread %s", branch_name, thread_id)
         loop = asyncio.get_event_loop()
         safe_repo_dir = shlex.quote(repo_dir)
         safe_branch = shlex.quote(branch_name)
@@ -447,9 +428,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
     linear_issue = config["configurable"].get("linear_issue", {})
     linear_project_id = linear_issue.get("linear_project_id", "")
     linear_issue_number = linear_issue.get("linear_issue_number", "")
-    agents_md, agents_md_filename = await read_agents_md_in_sandbox(
-        sandbox_backend, repo_dir
-    )
+    agents_md, agents_md_filename = await read_agents_md_in_sandbox(sandbox_backend, repo_dir)
 
     logger.info("Returning agent with sandbox for thread %s", thread_id)
 
@@ -495,6 +474,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
             jira_add_comment,
             jira_get_transitions,
             jira_transition_issue,
+            verify_pr,
         ],
         backend=sandbox_backend,
         middleware=[
@@ -513,9 +493,7 @@ async def get_agent(config: RunnableConfig) -> Pregel:  # noqa: PLR0915
         # Merge callbacks into config if they exist, otherwise create new
         merged_config = dict(config)
         if merged_config.get("callbacks"):
-            merged_config["callbacks"] = list(merged_config["callbacks"]) + [
-                langfuse_handler
-            ]
+            merged_config["callbacks"] = list(merged_config["callbacks"]) + [langfuse_handler]
         else:
             merged_config["callbacks"] = [langfuse_handler]
         return agent.with_config(merged_config)
