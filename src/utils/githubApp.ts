@@ -46,7 +46,9 @@ export async function generateAppJwt(): Promise<string> {
   // Convert PKCS#1 ("BEGIN RSA PRIVATE KEY") to PKCS#8 ("BEGIN PRIVATE KEY") if needed,
   // since jose's importPKCS8 only accepts PKCS#8 format.
   const normalizedKey = privateKey.includes("BEGIN RSA PRIVATE KEY")
-    ? createPrivateKey(privateKey).export({ type: "pkcs8", format: "pem" }).toString()
+    ? createPrivateKey(privateKey)
+        .export({ type: "pkcs8", format: "pem" })
+        .toString()
     : privateKey;
 
   const key = await importPKCS8(normalizedKey, "RS256");
@@ -82,7 +84,9 @@ export async function getInstallationToken(): Promise<string | null> {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`GitHub App token exchange failed (${response.status}): ${body}`);
+      throw new Error(
+        `GitHub App token exchange failed (${response.status}): ${body}`,
+      );
     }
 
     const data = (await response.json()) as { token: string };
