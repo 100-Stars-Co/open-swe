@@ -279,3 +279,17 @@ export async function addReactionToComment(
     body: JSON.stringify({ content: reaction }),
   });
 }
+
+export async function addReactionToIssue(
+  owner: string,
+  repo: string,
+  issueNumber: number,
+  reaction: string,
+  token: string,
+): Promise<void> {
+  await fetch(`${GITHUB_API_BASE}/repos/${owner}/${repo}/issues/${issueNumber}/reactions`, {
+    method: "POST",
+    headers: { ...githubHeaders(token), "Content-Type": "application/json" },
+    body: JSON.stringify({ content: reaction }),
+  });
+}

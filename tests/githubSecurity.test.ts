@@ -1,8 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import {
-  gitCheckoutExistingBranch,
-  gitPullBranch,
-} from "../src/utils/github.js";
+import { gitCheckoutExistingBranch, gitPullBranch } from "../src/utils/github.js";
 
 /**
  * Fake sandbox that records commands without executing them.

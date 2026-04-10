@@ -4,15 +4,9 @@
  */
 
 const IMAGE_MARKDOWN_RE = /!\[[^\]]*\]\((https?:\/\/[^\s)]+)\)/g;
-const IMAGE_URL_RE =
-  /(https?:\/\/[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)/gi;
+const IMAGE_URL_RE = /(https?:\/\/[^\s)]+\.(?:png|jpe?g|gif|webp|bmp|tiff)(?:\?[^\s)]+)?)/gi;
 
-const SUPPORTED_TYPES = new Set([
-  "image/jpeg",
-  "image/png",
-  "image/gif",
-  "image/webp",
-]);
+const SUPPORTED_TYPES = new Set(["image/jpeg", "image/png", "image/gif", "image/webp"]);
 
 /**
  * Extract image URLs from markdown image syntax and direct image links.
@@ -56,15 +50,11 @@ export async function fetchImageBlock(
     });
 
     if (!response.ok) {
-      console.warn(
-        `Failed to fetch image from ${imageUrl}: HTTP ${response.status}`,
-      );
+      console.warn(`Failed to fetch image from ${imageUrl}: HTTP ${response.status}`);
       return null;
     }
 
-    let contentType = (response.headers.get("content-type") ?? "")
-      .split(";")[0]
-      .trim();
+    let contentType = (response.headers.get("content-type") ?? "").split(";")[0].trim();
     if (!contentType) {
       // Guess from URL extension
       const ext = imageUrl.split("?")[0].split(".").pop()?.toLowerCase();
@@ -79,9 +69,7 @@ export async function fetchImageBlock(
     }
 
     if (!SUPPORTED_TYPES.has(contentType)) {
-      console.warn(
-        `Unsupported content type '${contentType}' for ${imageUrl}; skipping`,
-      );
+      console.warn(`Unsupported content type '${contentType}' for ${imageUrl}; skipping`);
       return null;
     }
 

@@ -11,10 +11,9 @@ import { serve } from "@hono/node-server";
 import { Client } from "@langchain/langgraph-sdk";
 import { Hono } from "hono";
 import { queueMessageForThread } from "./middleware/checkMessageQueue.js";
-import {
-  parseJiraCommentPayload,
-  parseJiraIssuePayload,
-} from "./utils/jiraWebhook.js";
+import { addReactionToComment, addReactionToIssue } from "./utils/github.js";
+import { getInstallationToken } from "./utils/githubApp.js";
+import { parseJiraCommentPayload, parseJiraIssuePayload } from "./utils/jiraWebhook.js";
 import {
   generateThreadIdFromTelegramChat,
   getTelegramRepoConfig,
@@ -38,14 +37,8 @@ function getLangGraphClient(): Client {
 /**
  * Generate a deterministic UUID-formatted thread ID from a GitHub issue.
  */
-function generateGithubThreadId(
-  owner: string,
-  repo: string,
-  issueNumber: number,
-): string {
-  const hash = createHash("sha256")
-    .update(`github:${owner}/${repo}#${issueNumber}`)
-    .digest("hex");
+function generateGithubThreadId(owner: string, repo: string, issueNumber: number): string {
+  const hash = createHash("sha256").update(`github:${owner}/${repo}#${issueNumber}`).digest("hex");
   return formatAsUuid(hash);
 }
 
@@ -167,15 +160,9 @@ app.post("/webhooks/github", async (c) => {
   return c.json({ ok: true });
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-async function handleGithubEvent(
-  event: string,
-  payload: Record<string, any>,
-): Promise<void> {
+async function handleGithubEvent(event: string, payload: Record<string, unknown>): Promise<void> {
   const action = payload.action as string;
-  const repo = payload.repository as
-    | { owner: { login: string }; name: string }
-    | undefined;
+  const repo = payload.repository as { owner: { login: string }; name: string } | undefined;
   if (!repo) return;
 
   const owner = repo.owner.login;
@@ -186,6 +173,8 @@ async function handleGithubEvent(
     return;
   }
 
+  const botUsername = process.env.GITHUB_BOT_USERNAME ?? "openswe";
+
   // Issue opened — treat as a new task
   if (event === "issues" && action === "opened") {
     const issue = payload.issue as {
@@ -194,6 +183,20 @@ async function handleGithubEvent(
       body: string;
       user: { login: string };
     };
+
+    // Only respond if bot is mentioned in title or body
+    if (!isBotMentioned(issue.title + (issue.body || ""), botUsername)) {
+      return;
+    }
+
+    // Acknowledge with a reaction
+    const token = await getInstallationToken();
+    if (token) {
+      await addReactionToIssue(owner, repoName, issue.number, "eyes", token).catch((err) =>
+        console.error("[github] Failed to add reaction to issue:", err),
+      );
+    }
+
     const threadId = generateGithubThreadId(owner, repoName, issue.number);
     await ensureThread(threadId);
 
@@ -222,12 +225,26 @@ async function handleGithubEvent(
   if (event === "issue_comment" && action === "created") {
     const issue = payload.issue as { number: number; pull_request?: unknown };
     const comment = payload.comment as {
+      id: number;
       body: string;
       user: { login: string };
     };
 
     // Only handle issue comments, not PR comments via this event
     if (issue.pull_request) return;
+
+    // Only respond if bot is mentioned
+    if (!isBotMentioned(comment.body, botUsername)) {
+      return;
+    }
+
+    // Acknowledge with a reaction
+    const token = await getInstallationToken();
+    if (token) {
+      await addReactionToComment(owner, repoName, comment.id, "eyes", token).catch((err) =>
+        console.error("[github] Failed to add reaction to comment:", err),
+      );
+    }
 
     const threadId = generateGithubThreadId(owner, repoName, issue.number);
 
@@ -259,9 +276,23 @@ async function handleGithubEvent(
   if (event === "pull_request_review_comment" && action === "created") {
     const pr = payload.pull_request as { number: number };
     const comment = payload.comment as {
+      id: number;
       body: string;
       user: { login: string };
     };
+
+    // Only respond if bot is mentioned
+    if (!isBotMentioned(comment.body, botUsername)) {
+      return;
+    }
+
+    // Acknowledge with a reaction
+    const token = await getInstallationToken();
+    if (token) {
+      await addReactionToComment(owner, repoName, comment.id, "eyes", token).catch((err) =>
+        console.error("[github] Failed to add reaction to PR comment:", err),
+      );
+    }
 
     const threadId = generateGithubThreadId(owner, repoName, pr.number);
 
@@ -301,8 +332,7 @@ app.post("/webhooks/jira", async (c) => {
     return c.json({ error: "Invalid signature" }, 403);
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-  const payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, any>;
+  const payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, unknown>;
   const event = payload.webhookEvent as string;
 
   handleJiraEvent(event, payload).catch((err) => {
@@ -312,18 +342,12 @@ app.post("/webhooks/jira", async (c) => {
   return c.json({ ok: true });
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-async function handleJiraEvent(
-  event: string,
-  payload: Record<string, any>,
-): Promise<void> {
+async function handleJiraEvent(event: string, payload: Record<string, unknown>): Promise<void> {
   const repoOwner = process.env.DEFAULT_REPO_OWNER ?? "";
   const repoName = process.env.DEFAULT_REPO_NAME ?? "";
 
   if (!repoOwner || !repoName) {
-    console.warn(
-      "[jira] DEFAULT_REPO_OWNER / DEFAULT_REPO_NAME not set — skipping run creation",
-    );
+    console.warn("[jira] DEFAULT_REPO_OWNER / DEFAULT_REPO_NAME not set — skipping run creation");
     return;
   }
 
@@ -397,8 +421,7 @@ app.post("/webhooks/telegram", async (c) => {
     return c.json({ error: "Invalid secret token" }, 403);
   }
 
-  // biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-  const payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, any>;
+  const payload = JSON.parse(rawBody.toString("utf-8")) as Record<string, unknown>;
 
   handleTelegramUpdate(payload).catch((err) => {
     console.error("[telegram webhook] Error:", err);
@@ -407,17 +430,12 @@ app.post("/webhooks/telegram", async (c) => {
   return c.json({ ok: true });
 });
 
-// biome-ignore lint/suspicious/noExplicitAny: webhook payload is untyped
-async function handleTelegramUpdate(
-  update: Record<string, any>,
-): Promise<void> {
+async function handleTelegramUpdate(update: Record<string, unknown>): Promise<void> {
   const message = update.message as Record<string, unknown> | undefined;
   if (!message) return;
 
   const text = (message.text as string) ?? "";
-  const chatId = (message.chat as Record<string, unknown>)?.id as
-    | number
-    | undefined;
+  const chatId = (message.chat as Record<string, unknown>)?.id as number | undefined;
   const messageId = message.message_id as number | undefined;
   const messageThreadId = (message.message_thread_id as number) ?? undefined;
   const botUsername = process.env.TELEGRAM_BOT_USERNAME ?? "";
@@ -426,11 +444,7 @@ async function handleTelegramUpdate(
 
   // Only respond to messages that mention the bot (in groups) or all messages in private chats
   const chatType = (message.chat as Record<string, unknown>)?.type as string;
-  if (
-    chatType !== "private" &&
-    botUsername &&
-    !isBotMentioned(text, botUsername)
-  ) {
+  if (chatType !== "private" && botUsername && !isBotMentioned(text, botUsername)) {
     return;
   }
 
@@ -444,13 +458,30 @@ async function handleTelegramUpdate(
   }
 
   const threadId = generateThreadIdFromTelegramChat(chatId, messageThreadId);
-  const senderName =
-    ((message.from as Record<string, unknown>)?.first_name as string) ?? "User";
+  const senderName = ((message.from as Record<string, unknown>)?.first_name as string) ?? "User";
 
   await ensureThread(threadId);
 
-  const agentMessage = [`Telegram message from ${senderName}:`, cleanText]
-    .filter(Boolean)
+  const agentMessage = [
+    "You were mentioned in Telegram.",
+    "",
+    "## Repository",
+    `${repoConfig.owner}/${repoConfig.name}`,
+    "",
+    "## Triggered by",
+    senderName,
+    "",
+    "## Telegram Chat",
+    `- Chat ID: ${chatId}`,
+    messageThreadId !== undefined ? `- Message Thread ID: ${messageThreadId}` : null,
+    messageId !== undefined ? `- Reply to Message ID: ${messageId}` : null,
+    "",
+    "## Latest Request",
+    cleanText,
+    "",
+    "Use `telegram_reply` to communicate in this Telegram chat for clarifications, status updates, and final summaries.",
+  ]
+    .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join("\n");
 
   const active = await isThreadActive(threadId);
@@ -480,9 +511,7 @@ const PORT = Number.parseInt(process.env.PORT ?? "8000", 10);
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
   serve({ fetch: app.fetch, port: PORT }, (info) => {
-    console.log(
-      `[openswe-js] Webhook server running at http://localhost:${info.port}`,
-    );
+    console.log(`[openswe-js] Webhook server running at http://localhost:${info.port}`);
   });
 }
 

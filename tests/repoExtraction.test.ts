@@ -8,9 +8,7 @@ describe("extractRepoFromTextFull", () => {
   });
 
   it("parses repo owner/name with space", () => {
-    const result = extractRepoFromTextFull(
-      "please use repo langchain-ai/langchainjs",
-    );
+    const result = extractRepoFromTextFull("please use repo langchain-ai/langchainjs");
     expect(result).toEqual({ owner: "langchain-ai", name: "langchainjs" });
   });
 

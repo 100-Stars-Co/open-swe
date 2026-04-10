@@ -9,6 +9,7 @@
 
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { createDeepAgent } from "deepagents";
+import { getLangfuseCallbackHandler } from "./integrations/langfuse.js";
 import {
   checkMessageQueueMiddleware,
   cleanupSandboxMiddleware,
@@ -44,11 +45,7 @@ import {
   webSearch,
 } from "./tools/index.js";
 import { readAgentsMd } from "./utils/agentsMd.js";
-import {
-  persistEncryptedGithubToken,
-  resolveGithubToken,
-} from "./utils/auth.js";
-import { makeModel } from "./utils/model.js";
+import { persistEncryptedGithubToken, resolveGithubToken } from "./utils/auth.js";
 import {
   cleanupGitCredentials,
   gitCheckoutBranch,
@@ -59,23 +56,16 @@ import {
   removeDirectory,
   setupGitCredentials,
 } from "./utils/github.js";
-import { createSandbox } from "./utils/sandbox.js";
-import {
-  SANDBOX_CREATING,
-  getSandboxBackend,
-  getSandboxMetadata,
-  setSandboxBackend,
-  setSandboxMetadata,
-  waitForSandboxId,
-} from "./utils/sandboxState.js";
+import { makeModel } from "./utils/model.js";
+import { resolveSandboxRepoDir } from "./utils/repoDir.js";
+import { getOrCreateSandbox } from "./utils/sandboxLifecycle.js";
+import { setSandboxMetadata } from "./utils/sandboxState.js";
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
-const DEFAULT_LLM_MODEL_ID =
-  process.env.DEEPAGENTS_MODEL ?? "anthropic:claude-opus-4-6";
+const DEFAULT_LLM_MODEL_ID = process.env.DEEPAGENTS_MODEL ?? "anthropic:claude-opus-4-6";
 const DEFAULT_RECURSION_LIMIT = 1_000; // reserved for future use
 void DEFAULT_RECURSION_LIMIT;
-const SANDBOX_CREATION_TIMEOUT_MS = 180_000; // 3 minutes
 
 const registeredTools = [
   // Core
@@ -115,7 +105,7 @@ interface RepoConfig {
 interface AgentConfigurable {
   thread_id: string;
   repo?: RepoConfig;
-  source?: "github" | "jira";
+  source?: "github" | "jira" | "telegram";
   issue_number?: number;
   base_branch?: string;
   jira_project_key?: string;
@@ -144,7 +134,7 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
       const { Annotation } = await import("@langchain/langgraph");
 
       const Schema = Annotation.Root({
-        messages: Annotation<any[]>({
+        messages: Annotation<unknown[]>({
           reducer: (x, y) => x.concat(y),
           default: () => [],
         }),
@@ -169,7 +159,7 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
   const sandbox = await getOrCreateSandbox(threadId);
 
   // 3. Clone or pull repo
-  const repoDir = `/home/user/repos/${repo.owner}/${repo.name}`;
+  const repoDir = resolveSandboxRepoDir(repo.owner, repo.name);
   await cloneOrPullRepo(sandbox, repo, repoDir, token, baseBranch);
 
   // 4. Store repo_dir in metadata so middleware can access it
@@ -208,7 +198,7 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
 
   // 9. Create and return agent
   const model = await makeModel(DEFAULT_LLM_MODEL_ID);
-  return createDeepAgent({
+  const agent = createDeepAgent({
     model,
     // biome-ignore lint/suspicious/noExplicitAny: tool types vary across langchain versions
     tools: tools as any[],
@@ -217,59 +207,9 @@ export async function getAgent(config: RunnableConfig): Promise<any> {
     systemPrompt,
     backend: sandbox,
   });
-}
 
-// ─── Sandbox lifecycle ────────────────────────────────────────────────────────
-
-async function getOrCreateSandbox(threadId: string) {
-  // Check in-process cache first
-  const cached = getSandboxBackend(threadId);
-  if (cached) return cached;
-
-  // Check thread metadata for persisted sandbox ID
-  const meta = await getSandboxMetadata(threadId);
-
-  let sandboxId = meta.sandboxId;
-
-  if (sandboxId === SANDBOX_CREATING) {
-    // Another invocation is creating the sandbox — wait for it
-    sandboxId = await waitForSandboxId(threadId, SANDBOX_CREATION_TIMEOUT_MS);
-    if (!sandboxId) {
-      throw new Error(
-        "Timed out waiting for sandbox to be created by concurrent invocation",
-      );
-    }
-  }
-
-  if (!sandboxId) {
-    // Mark as creating to prevent concurrent creates
-    await setSandboxMetadata(threadId, { sandboxId: SANDBOX_CREATING });
-  }
-
-  try {
-    const sandbox = await createSandbox(sandboxId ?? undefined);
-    setSandboxBackend(threadId, sandbox);
-
-    // Verify the sandbox is responsive
-    const probe = await sandbox.execute("echo ok");
-    if (probe.exitCode !== 0) throw new Error("Sandbox health check failed");
-
-    // Persist the new sandbox ID
-    if (!sandboxId) {
-      const newId = (sandbox as unknown as { id: string }).id;
-      if (newId) {
-        await setSandboxMetadata(threadId, { sandboxId: newId });
-      }
-    }
-
-    return sandbox;
-  } catch (err) {
-    // Clear CREATING sentinel on failure so next invocation retries
-    if (!sandboxId) {
-      await setSandboxMetadata(threadId, { sandboxId: "" }).catch(() => {});
-    }
-    throw err;
-  }
+  const langfuseHandler = await getLangfuseCallbackHandler();
+  return langfuseHandler ? agent.withConfig({ callbacks: [langfuseHandler] }) : agent;
 }
 
 // ─── Repo clone / pull ────────────────────────────────────────────────────────
@@ -298,8 +238,11 @@ async function cloneOrPullRepo(
   }
 
   // Fresh clone
-  const repoParentDir = `/home/user/repos/${repo.owner}`;
-  await sandbox.execute(`mkdir -p ${shellQuote(repoParentDir)}`);
+  const repoParentDir = repoDir.split("/").slice(0, -1).join("/") || "/";
+  const mkdirResult = await sandbox.execute(`mkdir -p ${shellQuote(repoParentDir)} 2>&1`);
+  if (mkdirResult.exitCode !== 0) {
+    throw new Error(`Failed to prepare repository directory: ${mkdirResult.output}`);
+  }
   await removeDirectory(sandbox, repoDir);
 
   const cloneUrl = `https://x-access-token:${token}@github.com/${repo.owner}/${repo.name}.git`;

@@ -32,9 +32,7 @@ export function extractRepoFromTextFull(
   }
 
   if (!owner || !name) {
-    const githubMatch = text.match(
-      /github\.com\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/,
-    );
+    const githubMatch = text.match(/github\.com\/([a-zA-Z0-9_.-]+\/[a-zA-Z0-9_.-]+)/);
     if (githubMatch) {
       [owner, name] = githubMatch[1].split("/", 2);
     }

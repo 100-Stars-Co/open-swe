@@ -9,15 +9,25 @@ import { extractRepoFromTextFull } from "./repo.js";
 import { getTraceUrl } from "./tracing.js";
 
 const TELEGRAM_API_BASE_URL = "https://api.telegram.org";
-const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN ?? "";
-const TELEGRAM_REPO_OWNER = process.env.TELEGRAM_REPO_OWNER ?? "";
-const TELEGRAM_REPO_NAME = process.env.TELEGRAM_REPO_NAME ?? "";
+
+function getTelegramBotToken(): string {
+  return process.env.TELEGRAM_BOT_TOKEN ?? "";
+}
+
+function getTelegramRepoOwner(): string {
+  return process.env.TELEGRAM_REPO_OWNER ?? "";
+}
+
+function getTelegramRepoName(): string {
+  return process.env.TELEGRAM_REPO_NAME ?? "";
+}
 
 function telegramApiUrl(method: string): string {
-  if (!TELEGRAM_BOT_TOKEN) {
+  const token = getTelegramBotToken();
+  if (!token) {
     throw new Error("TELEGRAM_BOT_TOKEN environment variable is not set");
   }
-  return `${TELEGRAM_API_BASE_URL}/bot${TELEGRAM_BOT_TOKEN}/${method}`;
+  return `${TELEGRAM_API_BASE_URL}/bot${token}/${method}`;
 }
 
 /**
@@ -25,14 +35,9 @@ function telegramApiUrl(method: string): string {
  * Telegram sends this header verbatim (no HMAC), so we do a constant-time
  * string comparison to avoid timing attacks.
  */
-export function verifyTelegramSecret(
-  token: string,
-  expectedSecret: string,
-): boolean {
+export function verifyTelegramSecret(token: string, expectedSecret: string): boolean {
   if (!expectedSecret) {
-    console.warn(
-      "TELEGRAM_WEBHOOK_SECRET is not configured — rejecting webhook request",
-    );
+    console.warn("TELEGRAM_WEBHOOK_SECRET is not configured — rejecting webhook request");
     return false;
   }
   if (!token) return false;
@@ -48,24 +53,52 @@ export function verifyTelegramSecret(
  * For standard chats, uses chat_id alone. For forum group topics,
  * uses chat_id + message_thread_id.
  */
-export function generateThreadIdFromTelegramChat(
-  chatId: number,
-  messageThreadId?: number,
-): string {
+export function generateThreadIdFromTelegramChat(chatId: number, messageThreadId?: number): string {
   const composite =
-    messageThreadId !== undefined
-      ? `telegram:${chatId}:${messageThreadId}`
-      : `telegram:${chatId}`;
+    messageThreadId !== undefined ? `telegram:${chatId}:${messageThreadId}` : `telegram:${chatId}`;
 
   const md5Hex = createHash("md5").update(composite).digest("hex");
   const h = md5Hex.slice(0, 32);
-  return [
-    h.slice(0, 8),
-    h.slice(8, 12),
-    h.slice(12, 16),
-    h.slice(16, 20),
-    h.slice(20, 32),
-  ].join("-");
+  return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join(
+    "-",
+  );
+}
+
+export interface TelegramReplyParameters {
+  messageId: number;
+  allowSendingWithoutReply?: boolean;
+}
+
+export interface SendTelegramMessageOptions {
+  replyParameters?: TelegramReplyParameters;
+  replyToMessageId?: number;
+  messageThreadId?: number;
+  parseMode?: string | null;
+  escapeHtmlOnParseError?: boolean;
+}
+
+export function escapeTelegramHtml(text: string): string {
+  return text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
+}
+
+function isTelegramHtmlParseError(description?: string): boolean {
+  if (!description) return false;
+  return /can't parse entities|entity.*byte|tag.*not allowed|can't find end tag|unsupported start tag/i.test(
+    description,
+  );
+}
+
+async function postTelegramMessage(
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const response = await fetch(telegramApiUrl("sendMessage"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(10_000),
+  });
+
+  return (await response.json()) as Record<string, unknown>;
 }
 
 /**
@@ -74,44 +107,64 @@ export function generateThreadIdFromTelegramChat(
 export async function sendTelegramMessage(
   chatId: number,
   text: string,
-  options?: {
-    replyToMessageId?: number;
-    messageThreadId?: number;
-    parseMode?: string;
-  },
+  options?: SendTelegramMessageOptions,
 ): Promise<Record<string, unknown>> {
-  if (!TELEGRAM_BOT_TOKEN) {
-    console.error(
-      "TELEGRAM_BOT_TOKEN is not set — cannot send Telegram message",
-    );
+  const token = getTelegramBotToken();
+  if (!token) {
+    console.error("TELEGRAM_BOT_TOKEN is not set — cannot send Telegram message");
     return { ok: false, error: "TELEGRAM_BOT_TOKEN not configured" };
   }
 
   const payload: Record<string, unknown> = {
     chat_id: chatId,
     text,
-    parse_mode: options?.parseMode ?? "HTML",
   };
-  if (options?.replyToMessageId !== undefined) {
-    payload.reply_to_message_id = options.replyToMessageId;
+  if (options?.parseMode !== undefined && options.parseMode !== null) {
+    payload.parse_mode = options.parseMode;
+  }
+  const replyParameters =
+    options?.replyParameters ??
+    (options?.replyToMessageId !== undefined
+      ? {
+          messageId: options.replyToMessageId,
+          allowSendingWithoutReply: true,
+        }
+      : undefined);
+  if (replyParameters) {
+    payload.reply_parameters = {
+      message_id: replyParameters.messageId,
+      allow_sending_without_reply: replyParameters.allowSendingWithoutReply ?? true,
+    };
   }
   if (options?.messageThreadId !== undefined) {
     payload.message_thread_id = options.messageThreadId;
   }
 
   try {
-    const response = await fetch(telegramApiUrl("sendMessage"), {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(10_000),
-    });
-
-    const data = (await response.json()) as Record<string, unknown>;
+    const data = await postTelegramMessage(payload);
     if (!data.ok) {
-      console.warn(
-        `Telegram sendMessage failed: ${(data.description as string) ?? "unknown error"}`,
-      );
+      const description = (data.description as string) ?? "unknown error";
+      if (
+        options?.escapeHtmlOnParseError &&
+        payload.parse_mode === "HTML" &&
+        isTelegramHtmlParseError(description)
+      ) {
+        const escapedPayload = {
+          ...payload,
+          text: escapeTelegramHtml(text),
+        };
+        const retryData = await postTelegramMessage(escapedPayload);
+        if (!retryData.ok) {
+          console.warn(
+            `Telegram sendMessage failed after HTML fallback: ${
+              (retryData.description as string) ?? "unknown error"
+            }`,
+          );
+        }
+        return retryData;
+      }
+
+      console.warn(`Telegram sendMessage failed: ${description}`);
     }
     return data;
   } catch (err) {
@@ -145,8 +198,8 @@ export function getTelegramRepoConfig(
   defaultOwner?: string,
   defaultName?: string,
 ): { owner: string; name: string } {
-  const ownerDefault = defaultOwner || TELEGRAM_REPO_OWNER;
-  const nameDefault = defaultName || TELEGRAM_REPO_NAME;
+  const ownerDefault = defaultOwner || getTelegramRepoOwner();
+  const nameDefault = defaultName || getTelegramRepoName();
 
   if (text) {
     const repoConfig = extractRepoFromTextFull(text, ownerDefault);

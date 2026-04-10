@@ -5,5 +5,6 @@ export {
   getLangfuseClient,
   isLangfuseConfigured,
 } from "./langfuse.js";
+export { createLangsmithSandbox, deleteLangsmithSandbox } from "./langsmith.js";
 export { createLocalSandbox } from "./local.js";
 export { createOpenSandbox, OpenSandboxBackend } from "./opensandbox.js";

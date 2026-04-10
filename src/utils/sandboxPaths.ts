@@ -8,10 +8,7 @@ import type { SandboxBackendProtocol } from "deepagents";
 
 type SyncExecuteResult = { exitCode: number; output: string };
 
-function executeSync(
-  sandbox: SandboxBackendProtocol,
-  command: string,
-): SyncExecuteResult {
+function executeSync(sandbox: SandboxBackendProtocol, command: string): SyncExecuteResult {
   return sandbox.execute(command) as unknown as SyncExecuteResult;
 }
 
@@ -20,10 +17,7 @@ const WORK_DIR_CACHE = new WeakMap<object, string>();
 /**
  * Resolve the repository directory for a sandbox backend.
  */
-export function resolveRepoDir(
-  sandbox: SandboxBackendProtocol,
-  repoName: string,
-): string {
+export function resolveRepoDir(sandbox: SandboxBackendProtocol, repoName: string): string {
   if (!repoName) throw new Error("repoName must be a non-empty string");
   const workDir = resolveSandboxWorkDir(sandbox);
   return posixpath.join(workDir, repoName);
@@ -53,9 +47,7 @@ export function resolveSandboxWorkDir(sandbox: SandboxBackendProtocol): string {
   throw new Error(msg);
 }
 
-function* iterWorkDirCandidates(
-  sandbox: SandboxBackendProtocol,
-): Generator<string> {
+function* iterWorkDirCandidates(sandbox: SandboxBackendProtocol): Generator<string> {
   const seen = new Set<string>();
 
   // Try pwd first
@@ -73,10 +65,7 @@ function* iterWorkDirCandidates(
   }
 }
 
-function resolveShellPath(
-  sandbox: SandboxBackendProtocol,
-  command: string,
-): string | null {
+function resolveShellPath(sandbox: SandboxBackendProtocol, command: string): string | null {
   const result = executeSync(sandbox, command);
   if (result.exitCode !== 0) return null;
   return normalizePath(result.output);
@@ -89,15 +78,9 @@ function normalizePath(rawPath: string | null): string | null {
   return posixpath.normalize(path);
 }
 
-function isWritableDirectory(
-  sandbox: SandboxBackendProtocol,
-  directory: string,
-): boolean {
+function isWritableDirectory(sandbox: SandboxBackendProtocol, directory: string): boolean {
   const safeDir = shellQuote(directory);
-  const result = executeSync(
-    sandbox,
-    `test -d ${safeDir} && test -w ${safeDir}`,
-  );
+  const result = executeSync(sandbox, `test -d ${safeDir} && test -w ${safeDir}`);
   return result.exitCode === 0;
 }
 

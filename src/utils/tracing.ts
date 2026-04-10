@@ -19,9 +19,7 @@ export function getTraceUrl(runId: string): string | null {
 
     const projectId = process.env.LANGFUSE_PROJECT_ID;
     if (!projectId) {
-      console.warn(
-        `LANGFUSE_PROJECT_ID not set, cannot generate trace URL for run ${runId}`,
-      );
+      console.warn(`LANGFUSE_PROJECT_ID not set, cannot generate trace URL for run ${runId}`);
       return null;
     }
 

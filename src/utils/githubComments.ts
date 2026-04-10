@@ -7,10 +7,8 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { GITHUB_USER_EMAIL_MAP } from "./githubUserEmailMap.js";
 
 export const OPEN_SWE_TAGS = ["@openswe", "@open-swe", "@openswe-dev"] as const;
-const UNTRUSTED_GITHUB_COMMENT_OPEN_TAG =
-  "<dangerous-external-untrusted-users-comment>";
-const UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG =
-  "</dangerous-external-untrusted-users-comment>";
+const UNTRUSTED_GITHUB_COMMENT_OPEN_TAG = "<dangerous-external-untrusted-users-comment>";
+const UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG = "</dangerous-external-untrusted-users-comment>";
 const SANITIZED_UNTRUSTED_OPEN = "[blocked-untrusted-comment-tag-open]";
 const SANITIZED_UNTRUSTED_CLOSE = "[blocked-untrusted-comment-tag-close]";
 
@@ -34,15 +32,9 @@ function githubHeaders(token: string): Record<string, string> {
 /**
  * Verify the GitHub webhook signature (X-Hub-Signature-256).
  */
-export function verifyGithubSignature(
-  body: Buffer,
-  signature: string,
-  secret: string,
-): boolean {
+export function verifyGithubSignature(body: Buffer, signature: string, secret: string): boolean {
   if (!secret) {
-    console.warn(
-      "GITHUB_WEBHOOK_SECRET is not configured — rejecting webhook request",
-    );
+    console.warn("GITHUB_WEBHOOK_SECRET is not configured — rejecting webhook request");
     return false;
   }
 
@@ -58,9 +50,7 @@ export function verifyGithubSignature(
  * Extract a UUID-formatted thread ID from a branch name.
  */
 export function getThreadIdFromBranch(branchName: string): string | null {
-  const match = branchName.match(
-    /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i,
-  );
+  const match = branchName.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i);
   return match ? match[0] : null;
 }
 
@@ -72,9 +62,7 @@ export function sanitizeGithubCommentBody(body: string): string {
     .replaceAll(UNTRUSTED_GITHUB_COMMENT_OPEN_TAG, SANITIZED_UNTRUSTED_OPEN)
     .replaceAll(UNTRUSTED_GITHUB_COMMENT_CLOSE_TAG, SANITIZED_UNTRUSTED_CLOSE);
   if (sanitized !== body) {
-    console.warn(
-      "Sanitized reserved untrusted-comment tags from GitHub comment body",
-    );
+    console.warn("Sanitized reserved untrusted-comment tags from GitHub comment body");
   }
   return sanitized;
 }
@@ -82,10 +70,7 @@ export function sanitizeGithubCommentBody(body: string): string {
 /**
  * Format a GitHub comment body for prompt inclusion.
  */
-export function formatGithubCommentBodyForPrompt(
-  author: string,
-  body: string,
-): string {
+export function formatGithubCommentBodyForPrompt(author: string, body: string): string {
   const sanitizedBody = sanitizeGithubCommentBody(body);
   if (author in GITHUB_USER_EMAIL_MAP) return sanitizedBody;
 
@@ -115,8 +100,7 @@ export async function reactToGithubComment(
     return reactViaGraphql(nodeId, token);
   }
 
-  const urlTemplate =
-    REACTION_ENDPOINTS[eventType] ?? REACTION_ENDPOINTS.issue_comment;
+  const urlTemplate = REACTION_ENDPOINTS[eventType] ?? REACTION_ENDPOINTS.issue_comment;
   const url = urlTemplate
     .replace("{owner}", repoConfig.owner)
     .replace("{repo}", repoConfig.name)
@@ -136,10 +120,7 @@ export async function reactToGithubComment(
   }
 }
 
-async function reactViaGraphql(
-  nodeId: string | undefined,
-  token: string,
-): Promise<boolean> {
+async function reactViaGraphql(nodeId: string | undefined, token: string): Promise<boolean> {
   if (!nodeId) {
     console.warn("No node_id provided for GraphQL reaction");
     return false;
@@ -191,17 +172,12 @@ export async function postGithubCommentOnIssue(
       body: JSON.stringify({ body }),
     });
     if (!response.ok) {
-      console.error(
-        `Failed to post comment to issue/PR #${issueNumber}: ${response.status}`,
-      );
+      console.error(`Failed to post comment to issue/PR #${issueNumber}: ${response.status}`);
       return false;
     }
     return true;
   } catch (err) {
-    console.error(
-      `Failed to post comment to GitHub issue/PR #${issueNumber}:`,
-      err,
-    );
+    console.error(`Failed to post comment to GitHub issue/PR #${issueNumber}:`, err);
     return false;
   }
 }
@@ -270,8 +246,7 @@ export async function fetchPrCommentsSinceLastTag(
   for (const c of prComments) {
     allComments.push({
       body: (c.body as string) ?? "",
-      author:
-        ((c.user as Record<string, unknown>)?.login as string) ?? "unknown",
+      author: ((c.user as Record<string, unknown>)?.login as string) ?? "unknown",
       created_at: (c.created_at as string) ?? "",
       type: "pr_comment",
       comment_id: c.id as number,
@@ -281,8 +256,7 @@ export async function fetchPrCommentsSinceLastTag(
   for (const c of reviewComments) {
     allComments.push({
       body: (c.body as string) ?? "",
-      author:
-        ((c.user as Record<string, unknown>)?.login as string) ?? "unknown",
+      author: ((c.user as Record<string, unknown>)?.login as string) ?? "unknown",
       created_at: (c.created_at as string) ?? "",
       type: "review_comment",
       comment_id: c.id as number,
@@ -296,8 +270,7 @@ export async function fetchPrCommentsSinceLastTag(
     if (!body) continue;
     allComments.push({
       body,
-      author:
-        ((r.user as Record<string, unknown>)?.login as string) ?? "unknown",
+      author: ((r.user as Record<string, unknown>)?.login as string) ?? "unknown",
       created_at: (r.submitted_at as string) ?? "",
       type: "review",
       comment_id: r.id as number,
@@ -316,8 +289,7 @@ export async function fetchPrCommentsSinceLastTag(
 
   if (tagIndices.length === 0) return [];
 
-  const start =
-    tagIndices.length === 1 ? 0 : tagIndices[tagIndices.length - 2] + 1;
+  const start = tagIndices.length === 1 ? 0 : tagIndices[tagIndices.length - 2] + 1;
   return allComments.slice(start);
 }
 
@@ -372,42 +344,24 @@ export async function extractPrContext(
     name: (repoData.name as string) ?? "",
   };
 
-  const prData = (payload.pull_request ?? payload.issue ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const prData = (payload.pull_request ?? payload.issue ?? {}) as Record<string, unknown>;
   const prNumber = (prData.number as number) ?? null;
   const prUrl = (prData.html_url as string) ?? (prData.url as string) ?? "";
   let branchName =
-    ((
-      (payload.pull_request as Record<string, unknown>)?.head as Record<
-        string,
-        unknown
-      >
-    )?.ref as string) ?? "";
+    (((payload.pull_request as Record<string, unknown>)?.head as Record<string, unknown>)
+      ?.ref as string) ?? "";
   const baseBranch =
-    ((
-      (payload.pull_request as Record<string, unknown>)?.base as Record<
-        string,
-        unknown
-      >
-    )?.ref as string) ?? "";
+    (((payload.pull_request as Record<string, unknown>)?.base as Record<string, unknown>)
+      ?.ref as string) ?? "";
 
   if (!branchName && prNumber) {
     branchName = await fetchPrBranch(repoConfig, prNumber);
   }
 
-  const githubLogin =
-    ((payload.sender as Record<string, unknown>)?.login as string) ?? "";
-  const comment = (payload.comment ?? payload.review ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const githubLogin = ((payload.sender as Record<string, unknown>)?.login as string) ?? "";
+  const comment = (payload.comment ?? payload.review ?? {}) as Record<string, unknown>;
   const commentId = (comment.id as number) ?? null;
-  const nodeId =
-    eventType === "pull_request_review"
-      ? ((comment.node_id as string) ?? null)
-      : null;
+  const nodeId = eventType === "pull_request_review" ? ((comment.node_id as string) ?? null) : null;
 
   return {
     repoConfig,

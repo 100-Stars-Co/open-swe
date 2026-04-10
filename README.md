@@ -122,14 +122,14 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 | **Tools** | ~15, curated | ~500, curated per-agent | OpenCode SDK + extensions | MCPs + custom Skills |
 | **Context** | AGENTS.md + issue/thread | Rule files + pre-hydration | OpenCode built-in | Linear-first + MCPs |
 | **Orchestration** | Subagents + middleware | Blueprints (deterministic + agentic) | Sessions + child sessions | Three modes |
-| **Invocation** | Slack, Linear, GitHub | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
+| **Invocation** | Slack, Linear, GitHub, Telegram | Slack + embedded buttons | Slack + web + Chrome extension | Slack-native |
 | **Validation** | Prompt-driven + PR safety net | 3-layer (local + CI + 1 retry) | Visual DOM verification | Agent councils + auto-merge |
 
 ---
 
 ## Features
 
-- **Trigger from Linear, Slack, or GitHub** — mention `@openswe` in a comment to kick off a task
+- **Trigger from Linear, Slack, GitHub, or Telegram** — mention `@openswe` or message the bot to kick off a task
 - **Instant acknowledgement** — reacts with 👀 the moment it picks up your message
 - **Message it while it's running** — send follow-up messages mid-task and it'll pick them up before its next step
 - **Run multiple tasks in parallel** — each task runs in its own isolated cloud sandbox
@@ -141,7 +141,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 
 ## Getting Started
 
-- **[Installation Guide](INSTALLATION.md)** — GitHub App creation, LangSmith, Linear/Slack/GitHub triggers, and production deployment
+- **[Installation Guide](INSTALLATION.md)** — GitHub App creation, Langfuse tracing, Linear/Slack/GitHub/Telegram triggers, and production deployment
 - **[Customization Guide](CUSTOMIZATION.md)** — swap the sandbox, model, tools, triggers, system prompt, and middleware for your org
 
 ## License

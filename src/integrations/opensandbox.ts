@@ -86,9 +86,7 @@ async function checkServerReachable(serverUrl: string): Promise<void> {
     socket.on("timeout", () => {
       socket.destroy();
       reject(
-        new Error(
-          `OpenSandbox server timed out at ${serverUrl} (host=${host}, port=${port}).`,
-        ),
+        new Error(`OpenSandbox server timed out at ${serverUrl} (host=${host}, port=${port}).`),
       );
     });
   });
@@ -125,7 +123,9 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
   async execute(command: string): Promise<ExecuteResponse> {
     try {
       // The SDK exposes commands.run(cmd, opts?, handlers?)
-      const result = await this._sandbox.commands.run(command);
+      const result = await this._sandbox.commands.run(command, {
+        timeout: this._defaultTimeout,
+      });
 
       // Extract stdout/stderr from logs
       const stdoutMsgs: unknown[] = result?.logs?.stdout ?? [];
@@ -229,9 +229,7 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
   }
 
   async lsInfo(path: string): Promise<FileInfo[]> {
-    const result = await this.execute(
-      `ls -la ${shellQuote(path)} 2>&1 | tail -n +2`,
-    );
+    const result = await this.execute(`ls -la ${shellQuote(path)} 2>&1 | tail -n +2`);
     if (result.exitCode !== 0) return [];
 
     return result.output
@@ -301,10 +299,7 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
             const content = await this._sandbox.files.readFile(p);
             return {
               path: p,
-              content:
-                typeof content === "string"
-                  ? new TextEncoder().encode(content)
-                  : content,
+              content: typeof content === "string" ? new TextEncoder().encode(content) : content,
               error: null,
             } satisfies FileDownloadResponse;
           }
@@ -325,18 +320,14 @@ export class OpenSandboxBackend implements SandboxBackendProtocol {
     );
   }
 
-  async uploadFiles(
-    files: Array<[string, Uint8Array]>,
-  ): Promise<FileUploadResponse[]> {
+  async uploadFiles(files: Array<[string, Uint8Array]>): Promise<FileUploadResponse[]> {
     return Promise.all(
       files.map(async ([path, data]) => {
         const content = new TextDecoder().decode(data);
         const result = await this.write(path, content);
         return {
           path,
-          error: result.error
-            ? ("permission_denied" as FileOperationError)
-            : null,
+          error: result.error ? ("permission_denied" as FileOperationError) : null,
         } satisfies FileUploadResponse;
       }),
     );
@@ -370,8 +361,7 @@ export async function createOpenSandbox(
   }
 
   const serverUrl = process.env.OPENSANDBOX_URL ?? DEFAULT_OPENSANDBOX_URL;
-  const template =
-    process.env.OPENSANDBOX_TEMPLATE ?? DEFAULT_OPENSANDBOX_TEMPLATE;
+  const template = process.env.OPENSANDBOX_TEMPLATE ?? DEFAULT_OPENSANDBOX_TEMPLATE;
   const resolvedTimeout = resolveTimeout(timeout);
   const envs = buildSandboxEnvs();
 
@@ -414,10 +404,7 @@ export async function createOpenSandbox(
     rawSandbox = await Sandbox.create(createOpts);
   }
 
-  return new OpenSandboxBackend(
-    rawSandbox,
-    resolvedTimeout,
-  ) as unknown as SandboxBackendProtocol;
+  return new OpenSandboxBackend(rawSandbox, resolvedTimeout) as unknown as SandboxBackendProtocol;
 }
 
 // ─── Internal ─────────────────────────────────────────────────────────────────

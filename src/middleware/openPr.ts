@@ -22,7 +22,8 @@ import {
   gitHasUnpushedCommits,
   gitPush,
 } from "../utils/github.js";
-import { getSandboxBackend } from "../utils/sandboxState.js";
+import { resolveSandboxRepoDir } from "../utils/repoDir.js";
+import { getSandboxBackend, getSandboxMetadata } from "../utils/sandboxState.js";
 
 export const openPrIfNeededMiddleware = createMiddleware({
   name: "OpenPrIfNeeded",
@@ -61,7 +62,8 @@ export const openPrIfNeededMiddleware = createMiddleware({
     const sandbox = getSandboxBackend(threadId) as SandboxBackendProtocol | undefined;
     if (!sandbox) return {};
 
-    const repoDir = `/home/user/repos/${repo.owner}/${repo.name}`;
+    const { repoDir: persistedRepoDir } = await getSandboxMetadata(threadId);
+    const repoDir = persistedRepoDir ?? resolveSandboxRepoDir(repo.owner, repo.name);
 
     try {
       const [token] = await resolveGithubTokenForMiddleware(threadId);

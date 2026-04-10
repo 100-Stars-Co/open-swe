@@ -13,18 +13,14 @@
 import type { RunnableConfig } from "@langchain/core/runnables";
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
+import { getLangfuseCallbackHandler } from "../integrations/langfuse.js";
 import { createOpenSandbox } from "../integrations/opensandbox.js";
 import { getInstallationToken } from "../utils/githubApp.js";
 import { postGithubCommentOnIssue } from "../utils/githubComments.js";
 
-const DEFAULT_VERIFICATION_TIMEOUT = Number.parseInt(
-  process.env.PR_VERIFY_TIMEOUT ?? "600",
-  10,
-);
+const DEFAULT_VERIFICATION_TIMEOUT = Number.parseInt(process.env.PR_VERIFY_TIMEOUT ?? "600", 10);
 const DEFAULT_VERIFY_MODEL =
-  process.env.PR_VERIFY_MODEL ??
-  process.env.DEEPAGENTS_MODEL ??
-  "anthropic:claude-opus-4-6";
+  process.env.PR_VERIFY_MODEL ?? process.env.DEEPAGENTS_MODEL ?? "anthropic:claude-opus-4-6";
 const MAX_COMMANDS_PER_PHASE = 4;
 const MAX_FILE_READ_BYTES = 20_000;
 const UNSAFE_TOKEN_RE = /[;&|`$()<>]/;
@@ -98,9 +94,7 @@ function safeReadFile(sandbox: any, repoDir: string, relPath: string): string {
 
 // biome-ignore lint/suspicious/noExplicitAny: sandbox type varies
 function fileExists(sandbox: any, repoDir: string, relPath: string): boolean {
-  const result = sandbox.execute(
-    `cd ${shellQuote(repoDir)} && test -f ${shellQuote(relPath)}`,
-  );
+  const result = sandbox.execute(`cd ${shellQuote(repoDir)} && test -f ${shellQuote(relPath)}`);
   return result.exitCode === 0;
 }
 
@@ -181,10 +175,7 @@ function normalizeCommandList(commands: unknown): string[][] {
   if (!Array.isArray(commands)) return [];
   const normalized: string[][] = [];
   for (const cmd of commands.slice(0, MAX_COMMANDS_PER_PHASE)) {
-    if (
-      Array.isArray(cmd) &&
-      cmd.every((part: unknown) => typeof part === "string" && part)
-    ) {
+    if (Array.isArray(cmd) && cmd.every((part: unknown) => typeof part === "string" && part)) {
       normalized.push(cmd);
     }
   }
@@ -206,8 +197,7 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
 
   try {
     const parsed = JSON.parse(trimmed);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
-      return parsed;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) return parsed;
   } catch {
     // try regex extraction
   }
@@ -216,8 +206,7 @@ function extractJsonObject(text: string): Record<string, unknown> | null {
   if (!match) return null;
   try {
     const parsed = JSON.parse(match[0]);
-    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed))
-      return parsed;
+    if (typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)) return parsed;
   } catch {
     // give up
   }
@@ -254,12 +243,8 @@ function buildHeuristicPlan(scan: RepoScan): VerificationPlan {
       return {
         repo_type: "javascript",
         setup_commands: setupCommand ? [setupCommand] : [],
-        verification_commands: verificationCommands.slice(
-          0,
-          MAX_COMMANDS_PER_PHASE,
-        ),
-        reasoning:
-          "Repo has package.json scripts and a detected package manager.",
+        verification_commands: verificationCommands.slice(0, MAX_COMMANDS_PER_PHASE),
+        reasoning: "Repo has package.json scripts and a detected package manager.",
         planner: "heuristic",
       };
     }
@@ -276,9 +261,7 @@ function buildHeuristicPlan(scan: RepoScan): VerificationPlan {
 
 // @ts-ignore: kept for future model-based planning
 // biome-ignore lint/correctness/noUnusedVariables: kept for future model-based planning
-async function planCommandsWithModel(
-  scan: RepoScan,
-): Promise<VerificationPlan | null> {
+async function planCommandsWithModel(scan: RepoScan): Promise<VerificationPlan | null> {
   if (
     !scan.files.Makefile &&
     !scan.files["package.json"] &&
@@ -292,18 +275,17 @@ async function planCommandsWithModel(
   const prompt = `You are planning CI verification commands for a checked-out repository.\nReturn JSON only with keys: repo_type, setup_commands, verification_commands, reasoning.\nEach command must be an array of argv strings.\nRules:\n- Use repo-native commands only.\n- Prefer Makefile targets if the repo is make-based.\n- For JS/TS repos, prefer the detected package manager and only scripts that exist.\n- Do not invent commands not supported by the repo.\n- If no safe plan exists, return empty command arrays and explain why.\nRepository scan:\n${JSON.stringify(scan, null, 2)}\nKnown scripts: ${JSON.stringify(scripts)}`;
 
   try {
+    const langfuseHandler = await getLangfuseCallbackHandler();
     const { makeModel } = await import("../utils/model.js");
-    const model = await makeModel(DEFAULT_VERIFY_MODEL, {
-      temperature: 0,
-      maxTokens: 1500,
-    });
-    const resolvedModel =
-      typeof model === "string"
-        ? await (
-            await import("langchain")
-          ).initChatModel(model, { temperature: 0, maxTokens: 1500 })
-        : model;
-    const response = await resolvedModel.invoke(prompt);
+    const model = await makeModel(
+      DEFAULT_VERIFY_MODEL,
+      {
+        temperature: 0,
+        maxTokens: 1500,
+      },
+      langfuseHandler ? [langfuseHandler] : [],
+    );
+    const response = await model.invoke(prompt);
     let content = response.content;
     if (Array.isArray(content)) {
       content = content
@@ -386,11 +368,7 @@ function runCommand(
   };
 }
 
-function setupFallbackCommands(
-  cmd: string[],
-  result: CommandResult,
-  scan: RepoScan,
-): string[][] {
+function setupFallbackCommands(cmd: string[], result: CommandResult, scan: RepoScan): string[][] {
   if (
     cmd[0] === "npm" &&
     cmd[1] === "ci" &&
@@ -415,15 +393,7 @@ function buildComment(opts: {
   results: CommandResult[];
   plannedCommands: { setup: string[][]; verify: string[][] };
 }): string {
-  const {
-    prNumber,
-    headBranch,
-    timeout,
-    status,
-    reason,
-    results,
-    plannedCommands,
-  } = opts;
+  const { prNumber, headBranch, timeout, status, reason, results, plannedCommands } = opts;
   const emojiMap: Record<string, string> = {
     passed: "✅",
     failed: "❌",
@@ -449,14 +419,12 @@ function buildComment(opts: {
   if (reason) lines.push(`**Reason:** ${reason}`, "");
   if (plannedCommands.setup.length) {
     lines.push("### Planned Setup");
-    for (const cmd of plannedCommands.setup)
-      lines.push(`- \`${shellJoin(cmd)}\``);
+    for (const cmd of plannedCommands.setup) lines.push(`- \`${shellJoin(cmd)}\``);
     lines.push("");
   }
   if (plannedCommands.verify.length) {
     lines.push("### Planned Verification");
-    for (const cmd of plannedCommands.verify)
-      lines.push(`- \`${shellJoin(cmd)}\``);
+    for (const cmd of plannedCommands.verify) lines.push(`- \`${shellJoin(cmd)}\``);
     lines.push("");
   }
 
@@ -593,13 +561,9 @@ export async function verifyPr(
     const prDetails = await fetchPrDetails(owner, name, prNumber, token);
     if (!prDetails) return blocked(`Could not fetch PR #${prNumber} details`);
 
-    const headBranch = (prDetails.head as Record<string, unknown>)
-      ?.ref as string;
+    const headBranch = (prDetails.head as Record<string, unknown>)?.ref as string;
     const headRepoUrl = (
-      (prDetails.head as Record<string, unknown>)?.repo as Record<
-        string,
-        unknown
-      >
+      (prDetails.head as Record<string, unknown>)?.repo as Record<string, unknown>
     )?.clone_url as string;
 
     if (!headBranch || !headRepoUrl) {
@@ -627,17 +591,13 @@ export async function verifyPr(
         `cd ${shellQuote(repoDir)} && git config credential.helper 'store --file=${credFile}' && git fetch origin && git checkout ${shellQuote(headBranch)}`,
       );
       if (checkoutResult.exitCode !== 0) {
-        return blocked(
-          `Failed to checkout branch ${headBranch}: ${checkoutResult.output}`,
-        );
+        return blocked(`Failed to checkout branch ${headBranch}: ${checkoutResult.output}`);
       }
 
       const scan = scanRepo(sandbox, repoDir);
       const plan = resolveVerificationPlan(scan, options?.commands);
       const setupCommands = normalizeCommandList(plan.setup_commands);
-      const verificationCommands = normalizeCommandList(
-        plan.verification_commands,
-      );
+      const verificationCommands = normalizeCommandList(plan.verification_commands);
       const plannedCommands = {
         setup: setupCommands,
         verify: verificationCommands,
@@ -649,9 +609,7 @@ export async function verifyPr(
       if (!verificationCommands.length) {
         status = "blocked";
         error = plan.reasoning || "No safe verification commands were found";
-      } else if (
-        !commandsAreSafe([...setupCommands, ...verificationCommands])
-      ) {
+      } else if (!commandsAreSafe([...setupCommands, ...verificationCommands])) {
         status = "blocked";
         error = "Verification planner returned unsafe commands";
       } else {
@@ -661,18 +619,8 @@ export async function verifyPr(
           results.push(result);
           if (result.exit_code !== 0) {
             let fallbackSucceeded = false;
-            for (const fallbackCmd of setupFallbackCommands(
-              cmd,
-              result,
-              scan,
-            )) {
-              const fbResult = runCommand(
-                sandbox,
-                repoDir,
-                fallbackCmd,
-                timeout,
-                "setup",
-              );
+            for (const fallbackCmd of setupFallbackCommands(cmd, result, scan)) {
+              const fbResult = runCommand(sandbox, repoDir, fallbackCmd, timeout, "setup");
               results.push(fbResult);
               if (fbResult.exit_code === 0) {
                 fallbackSucceeded = true;
@@ -721,27 +669,13 @@ export async function verifyPr(
       const labelsAdded: string[] = [];
       if (addLabels) {
         if (status === "passed") {
-          await removePrLabel(
-            owner,
-            name,
-            prNumber,
-            "verification-failed",
-            token,
-          );
+          await removePrLabel(owner, name, prNumber, "verification-failed", token);
           if (await addPrLabel(owner, name, prNumber, "verified", token)) {
             labelsAdded.push("verified");
           }
         } else {
           await removePrLabel(owner, name, prNumber, "verified", token);
-          if (
-            await addPrLabel(
-              owner,
-              name,
-              prNumber,
-              "verification-failed",
-              token,
-            )
-          ) {
+          if (await addPrLabel(owner, name, prNumber, "verification-failed", token)) {
             labelsAdded.push("verification-failed");
           }
         }
@@ -768,9 +702,7 @@ export async function verifyPr(
     }
   } catch (e) {
     console.error("verify_pr failed:", e);
-    return blocked(
-      `${e instanceof Error ? e.constructor.name : "Error"}: ${e}`,
-    );
+    return blocked(`${e instanceof Error ? e.constructor.name : "Error"}: ${e}`);
   }
 }
 
@@ -778,11 +710,7 @@ export async function verifyPr(
 
 const schema = z.object({
   pr_number: z.number().int().describe("The pull request number to verify."),
-  timeout: z
-    .number()
-    .int()
-    .optional()
-    .describe("Timeout in seconds for the verification run."),
+  timeout: z.number().int().optional().describe("Timeout in seconds for the verification run."),
   add_labels: z
     .boolean()
     .optional()
@@ -793,9 +721,7 @@ const schema = z.object({
 export const verifyPrTool = tool(
   async ({ pr_number, timeout, add_labels }, config: RunnableConfig) => {
     const configurable = config?.configurable ?? {};
-    const repo = configurable.repo as
-      | { owner: string; name: string }
-      | undefined;
+    const repo = configurable.repo as { owner: string; name: string } | undefined;
 
     const result = await verifyPr(pr_number, {
       timeout: timeout ?? DEFAULT_VERIFICATION_TIMEOUT,

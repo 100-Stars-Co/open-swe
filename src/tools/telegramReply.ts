@@ -21,18 +21,11 @@ const schema = z.object({
 export const telegramReply = tool(
   async ({ message }, config: RunnableConfig) => {
     const configurable = config?.configurable ?? {};
-    const telegramChat = (configurable.telegram_chat ?? {}) as Record<
-      string,
-      unknown
-    >;
+    const telegramChat = (configurable.telegram_chat ?? {}) as Record<string, unknown>;
 
     const chatId = telegramChat.chat_id as number | undefined;
-    const replyToMessageId = telegramChat.reply_to_message_id as
-      | number
-      | undefined;
-    const messageThreadId = telegramChat.message_thread_id as
-      | number
-      | undefined;
+    const replyToMessageId = telegramChat.reply_to_message_id as number | undefined;
+    const messageThreadId = telegramChat.message_thread_id as number | undefined;
 
     if (!chatId) {
       return JSON.stringify({
@@ -49,9 +42,16 @@ export const telegramReply = tool(
     }
 
     const result = await sendTelegramMessage(chatId, message, {
-      replyToMessageId,
+      replyParameters:
+        replyToMessageId !== undefined
+          ? {
+              messageId: replyToMessageId,
+              allowSendingWithoutReply: true,
+            }
+          : undefined,
       messageThreadId,
       parseMode: "HTML",
+      escapeHtmlOnParseError: true,
     });
 
     return JSON.stringify({ success: result.ok === true });

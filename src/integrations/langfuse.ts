@@ -7,8 +7,6 @@
  */
 
 // biome-ignore lint/suspicious/noExplicitAny: Langfuse types are loaded dynamically
-let _callbackHandler: any | null = null;
-// biome-ignore lint/suspicious/noExplicitAny: Langfuse types are loaded dynamically
 let _langfuseClient: any | null = null;
 
 /**
@@ -25,14 +23,10 @@ let _langfuseClient: any | null = null;
  */
 // biome-ignore lint/suspicious/noExplicitAny: return type depends on langfuse package
 export async function getLangfuseCallbackHandler(): Promise<any | null> {
-  if (_callbackHandler) return _callbackHandler;
-
   const publicKey = process.env.LANGFUSE_PUBLIC_KEY;
   const secretKey = process.env.LANGFUSE_SECRET_KEY;
   const host =
-    process.env.LANGFUSE_BASE_URL ??
-    process.env.LANGFUSE_HOST ??
-    "https://cloud.langfuse.com";
+    process.env.LANGFUSE_BASE_URL ?? process.env.LANGFUSE_HOST ?? "https://cloud.langfuse.com";
 
   if (!publicKey || !secretKey) return null;
 
@@ -40,11 +34,16 @@ export async function getLangfuseCallbackHandler(): Promise<any | null> {
     const { Langfuse } = await import("langfuse");
     const { CallbackHandler } = await import("langfuse-langchain");
 
-    _langfuseClient = new Langfuse({ publicKey, secretKey, baseUrl: host });
-    _callbackHandler = new CallbackHandler();
+    const createdClient = !_langfuseClient;
+    if (createdClient) {
+      _langfuseClient = new Langfuse({ publicKey, secretKey, baseUrl: host });
+    }
+    const callbackHandler = new CallbackHandler({ publicKey, secretKey, baseUrl: host });
 
-    console.log("[Langfuse] Callback handler initialised");
-    return _callbackHandler;
+    if (createdClient) {
+      console.log("[Langfuse] Langfuse client initialised");
+    }
+    return callbackHandler;
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code === "MODULE_NOT_FOUND") {
       console.warn(
@@ -64,6 +63,17 @@ export async function getLangfuseCallbackHandler(): Promise<any | null> {
 export async function getLangfuseClient(): Promise<any | null> {
   if (!_langfuseClient) await getLangfuseCallbackHandler();
   return _langfuseClient;
+}
+
+/**
+ * Apply Langfuse tracing callbacks to a runnable if tracing is configured.
+ */
+export async function withLangfuseTracing<
+  T extends { withConfig?: (config: Record<string, unknown>) => unknown },
+>(runnable: T): Promise<T> {
+  const handler = await getLangfuseCallbackHandler();
+  if (!handler || typeof runnable.withConfig !== "function") return runnable;
+  return runnable.withConfig({ callbacks: [handler] }) as T;
 }
 
 /** Check if the minimum required env vars are set. */

@@ -24,7 +24,8 @@ import {
   gitHasUnpushedCommits,
   gitPush,
 } from "../utils/github.js";
-import { getSandboxBackend } from "../utils/sandboxState.js";
+import { resolveSandboxRepoDir } from "../utils/repoDir.js";
+import { getSandboxBackend, getSandboxMetadata } from "../utils/sandboxState.js";
 
 const schema = z.object({
   title: z.string().describe("The pull request title. Should be concise and descriptive."),
@@ -61,7 +62,8 @@ export const commitAndOpenPr = tool(
 
     try {
       const [token] = await resolveGithubToken({}, threadId);
-      const repoDir = `/home/user/repos/${repo.owner}/${repo.name}`;
+      const { repoDir: persistedRepoDir } = await getSandboxMetadata(threadId);
+      const repoDir = persistedRepoDir ?? resolveSandboxRepoDir(repo.owner, repo.name);
 
       // Configure git identity
       await gitConfigUser(sandbox, repoDir, "Open SWE Bot", "openswe@users.noreply.github.com");

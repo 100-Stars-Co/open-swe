@@ -52,6 +52,7 @@ You have access to tools for:
 - Searching the web and fetching documentation
 - Interacting with GitHub (PRs, comments, reviews)
 - Interacting with Jira (issues, comments, transitions)
+- Interacting with Telegram chats
 - Making HTTP requests to external APIs
 
 Work autonomously and persistently until the task is complete.
@@ -77,6 +78,7 @@ Follow this workflow for every task:
    Then post a summary comment on the original issue/ticket.
 
 6. **Communicate** — After opening the PR, add a comment on the issue/ticket linking it.
+   For Telegram-triggered tasks, use \`telegram_reply\` for clarifications, status updates, and final summaries.
 `;
 
 const TOOL_USAGE_SECTION = `
@@ -87,8 +89,9 @@ const TOOL_USAGE_SECTION = `
 - **http_request**: Use for REST API calls. Private IPs are blocked.
 - **web_search**: Use for finding documentation, package versions, or error solutions.
 - **commit_and_open_pr**: Call this exactly once when your implementation is complete.
-- **github_comment / jira_add_comment**: Use to report progress and link the final PR.
+- **github_comment / jira_add_comment / telegram_reply**: Use to report progress and link the final PR in the source channel.
 - **write_todos**: Always maintain an up-to-date todo list so your progress is trackable.
+- **telegram_reply**: Use this for Telegram-triggered tasks. Do not leave Telegram questions unanswered.
 `;
 
 const CODING_STANDARDS_SECTION = `

@@ -1,7 +1,7 @@
 
 # Installation Guide
 
-This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, LangSmith configuration, webhooks, and production deployment.
+This guide walks you through setting up Open SWE end-to-end: local development, GitHub App creation, Langfuse tracing, webhooks, and production deployment.
 
 > **The steps are ordered to avoid forward references.** Each step only depends on things you've already completed.
 
@@ -48,7 +48,7 @@ Before creating the app you need to decide on an **OAuth provider ID** — this 
 github-oauth-provider
 ```
 
-Write this down. You'll use it in the callback URL below and again in step 4 when configuring LangSmith.
+Write this down. You'll use it in the callback URL below and again in step 4 when configuring the tracing and OAuth setup.
 
 ### 3b. Create the app
 
@@ -98,21 +98,23 @@ After creating the app:
    ```
    The number at the end (`12345678`) is your **Installation ID**. Save this as `GITHUB_APP_INSTALLATION_ID`.
 
-> **Note**: The installation page may prompt you to authenticate with LangSmith. If you haven't set up LangSmith yet (step 4), that's fine — you can still grab the Installation ID from the URL and complete the OAuth setup later.
+> **Note**: The installation page may prompt you to authenticate with LangSmith. If you haven't set up the OAuth provider yet (step 4), that's fine — you can still grab the Installation ID from the URL and complete the setup later.
 
-## 4. Set up LangSmith
+## 4. Set up Langfuse tracing
 
-Open SWE uses [LangSmith](https://smith.langchain.com/) for:
+Open SWE uses [Langfuse](https://langfuse.com/) for tracing:
 - **Tracing**: all agent runs are logged for debugging and observability
-- **Sandboxes**: each task runs in an isolated LangSmith cloud sandbox
+- **Trace links**: comments and PR footers point to Langfuse traces
 
-### 4a. Get your API key, project and tenant IDs
+If you also use LangSmith sandboxes, keep the sandbox-related variables below and in the sandbox section.
 
-1. Create a [LangSmith account](https://smith.langchain.com/) if you don't have one
+### 4a. Get your Langfuse API key and project ID
+
+1. Create a [Langfuse account](https://langfuse.com/) if you don't have one
 2. Go to **Settings → API Keys → Create API Key**
-3. Save it as `LANGSMITH_API_KEY_PROD`
-4. Get your **Tenant ID**: Visit LangSmith, login, then copy the UUID in the URL. Example: if your URL is `https://smith.langchain.com/o/72184268-01ea-4d29-98cc-6cfcf0f2abb0/agents/chat` -> the tenant ID would be `72184268-01ea-4d29-98cc-6cfcf0f2abb0`. Save it as `LANGSMITH_TENANT_ID_PROD`.
-5. Get your **Project ID**: open your tracing project in LangSmith, then click on the **ID** button in the top left, directly next to the project name. Save it as `LANGSMITH_TRACING_PROJECT_ID_PROD`
+3. Save the public and secret keys as `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY`
+4. Get your **Project ID** from the Langfuse project settings and save it as `LANGFUSE_PROJECT_ID`
+5. If you self-host Langfuse, set `LANGFUSE_BASE_URL` or `LANGFUSE_HOST` to your deployment URL
 
 ### 4b. Configure GitHub OAuth (optional but recommended)
 
@@ -296,13 +298,18 @@ Slack messages are routed to the default repo (`DEFAULT_REPO_OWNER`/`DEFAULT_REP
 Create a `.env` file in the project root. Below is the full list — only fill in the sections relevant to the triggers you configured.
 
 ```bash
-# === LangSmith ===
-LANGSMITH_API_KEY_PROD=""              # From step 4a
-LANGCHAIN_TRACING_V2="true"
-LANGCHAIN_PROJECT=""                   # LangSmith project name for traces
-LANGSMITH_TENANT_ID_PROD=""           
-LANGSMITH_TRACING_PROJECT_ID_PROD=""  
-LANGSMITH_URL_PROD="https://smith.langchain.com"                 
+# === Langfuse tracing ===
+LANGFUSE_PUBLIC_KEY=""                 # From step 4a
+LANGFUSE_SECRET_KEY=""                 # From step 4a
+LANGFUSE_PROJECT_ID=""                 # From step 4a
+LANGFUSE_BASE_URL="https://cloud.langfuse.com"  # Optional self-hosted override
+LANGFUSE_HOST=""                       # Optional self-hosted alias
+
+# === LangSmith sandboxes (optional) ===
+LANGSMITH_API_KEY_PROD=""              # From sandbox setup
+LANGSMITH_TENANT_ID_PROD=""
+LANGSMITH_TRACING_PROJECT_ID_PROD=""
+LANGSMITH_URL_PROD="https://smith.langchain.com"
 
 # === LLM ===
 ANTHROPIC_API_KEY=""                   # Anthropic API key (default provider)
@@ -343,6 +350,13 @@ SLACK_BOT_USER_ID=""
 SLACK_BOT_USERNAME=""
 SLACK_SIGNING_SECRET=""
 
+# === Telegram (if using Telegram trigger) ===
+TELEGRAM_BOT_TOKEN=""                  # Bot token from @BotFather
+TELEGRAM_BOT_USERNAME=""               # Bot username without the @
+TELEGRAM_WEBHOOK_SECRET=""             # Secret configured when setting the webhook
+TELEGRAM_REPO_OWNER=""                 # Fallback GitHub org for Telegram messages
+TELEGRAM_REPO_NAME=""                  # Fallback GitHub repo for Telegram messages
+
 # === Exa (optional — enables web search tool) ===
 EXA_API_KEY=""                         # From https://dashboard.exa.ai
 
@@ -371,6 +385,8 @@ The server runs on `http://localhost:2024` with these endpoints:
 | `GET /webhooks/linear` | Linear webhook verification |
 | `POST /webhooks/slack` | Slack event webhooks |
 | `GET /webhooks/slack` | Slack webhook verification |
+| `POST /webhooks/telegram` | Telegram bot webhooks |
+| `GET /webhooks/telegram` | Telegram webhook verification |
 | `GET /health` | Health check |
 
 ## 8. Verify it works
@@ -381,7 +397,7 @@ The server runs on `http://localhost:2024` with these endpoints:
 2. Create or comment on an issue with: `@openswe what files are in this repo?`
 3. You should see:
    - A 👀 reaction on your comment within a few seconds
-   - A new run in your LangSmith project
+   - A new trace in your Langfuse project
    - The agent replies with a comment on the issue
 
 ### Linear
@@ -390,7 +406,7 @@ The server runs on `http://localhost:2024` with these endpoints:
 2. Add a comment: `@openswe what files are in this repo?`
 3. You should see:
    - A 👀 reaction on your comment within a few seconds
-   - A new run in your LangSmith project
+   - A new trace in your Langfuse project
    - The agent replies with a comment on the issue
 
 ### Slack
@@ -401,6 +417,15 @@ The server runs on `http://localhost:2024` with these endpoints:
    - An 👀 reaction on your message
    - A reply in the thread with the agent's response
 
+### Telegram
+
+1. Configure your bot webhook to point at `https://<your-url>/webhooks/telegram` with the same secret as `TELEGRAM_WEBHOOK_SECRET`
+2. Send the bot a direct message, or mention it in a group: `@your_bot what's in the repo?`
+3. You should see:
+   - A new trace in your Langfuse project
+   - A reply in the same chat
+   - If no repo is included in the message, the bot uses `TELEGRAM_REPO_OWNER` / `TELEGRAM_REPO_NAME`
+
 ## 9. Production deployment
 
 For production, deploy the agent on [LangGraph Cloud](https://langchain-ai.github.io/langgraph/cloud/) instead of running locally:
@@ -408,7 +433,7 @@ For production, deploy the agent on [LangGraph Cloud](https://langchain-ai.githu
 1. Push your code to a GitHub repository
 2. Connect the repo to LangGraph Cloud
 3. Set all environment variables from step 6 in the deployment config
-4. Update your webhook URLs (Linear, Slack, GitHub App) to point to your production URL (replace the ngrok URL)
+4. Update your webhook URLs (Linear, Slack, Telegram, GitHub App) to point to your production URL (replace the ngrok URL)
 
 The `langgraph.json` at the project root already defines the graph entry point and HTTP app:
 
@@ -438,7 +463,7 @@ The `langgraph.json` at the project root already defines the graph entry point a
 - Ensure the GitHub App is installed on the target repositories
 - Check that the private key includes the full `-----BEGIN RSA PRIVATE KEY-----` and `-----END RSA PRIVATE KEY-----` lines
 
-### Sandbox creation failures
+### LangSmith sandbox creation failures
 
 - Verify `LANGSMITH_API_KEY_PROD` is set and valid
 - Check LangSmith sandbox quotas in your workspace settings

@@ -172,6 +172,7 @@ TOKEN_ENCRYPTION_KEY        # Base64 32-byte Fernet key
 # Daytona
 DAYTONA_API_KEY             # API key for Daytona
 DAYTONA_API_URL             # Daytona server URL (default: https://app.daytona.io/api)
+DAYTONA_SNAPSHOT            # Snapshot name for new Daytona sandboxes (default: daytona-medium)
 
 # OpenSandbox (self-hosted option - https://github.com/alibaba/OpenSandbox)
 OPENSANDBOX_URL             # OpenSandbox server URL (default: http://localhost:9000)

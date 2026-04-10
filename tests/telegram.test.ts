@@ -10,9 +10,7 @@ import {
 describe("generateThreadIdFromTelegramChat", () => {
   it("is deterministic", () => {
     const chatId = 123456789;
-    expect(generateThreadIdFromTelegramChat(chatId)).toBe(
-      generateThreadIdFromTelegramChat(chatId),
-    );
+    expect(generateThreadIdFromTelegramChat(chatId)).toBe(generateThreadIdFromTelegramChat(chatId));
   });
 
   it("returns a UUID-length string", () => {
@@ -20,9 +18,7 @@ describe("generateThreadIdFromTelegramChat", () => {
   });
 
   it("produces different IDs for different chat_ids", () => {
-    expect(generateThreadIdFromTelegramChat(1)).not.toBe(
-      generateThreadIdFromTelegramChat(2),
-    );
+    expect(generateThreadIdFromTelegramChat(1)).not.toBe(generateThreadIdFromTelegramChat(2));
   });
 
   it("differs with message_thread_id", () => {
@@ -88,9 +84,7 @@ describe("stripBotMention", () => {
   });
 
   it("returns original when no mention", () => {
-    expect(stripBotMention("just a normal message", "mybot")).toBe(
-      "just a normal message",
-    );
+    expect(stripBotMention("just a normal message", "mybot")).toBe("just a normal message");
   });
 });
 
@@ -106,11 +100,7 @@ describe("getTelegramRepoConfig", () => {
   });
 
   it("falls back to defaults when no directive", () => {
-    const config = getTelegramRepoConfig(
-      "just a normal message",
-      "default-org",
-      "default-repo",
-    );
+    const config = getTelegramRepoConfig("just a normal message", "default-org", "default-repo");
     expect(config.owner).toBe("default-org");
     expect(config.name).toBe("default-repo");
   });

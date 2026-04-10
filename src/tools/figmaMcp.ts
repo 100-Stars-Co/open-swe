@@ -14,10 +14,7 @@ import { z } from "zod";
  * Spawn a figma-developer-mcp process and invoke a tool by name.
  * Uses child_process since MCP stdio transport is process-based.
  */
-async function invokeFigmaTool(
-  toolName: string,
-  args: Record<string, unknown>,
-): Promise<unknown> {
+async function invokeFigmaTool(toolName: string, args: Record<string, unknown>): Promise<unknown> {
   const { MultiServerMCPClient } = await import("@langchain/mcp-adapters");
   const figmaApiKey = process.env.FIGMA_API_KEY ?? "";
 
@@ -25,12 +22,7 @@ async function invokeFigmaTool(
     figma: {
       transport: "stdio",
       command: "npx",
-      args: [
-        "-y",
-        "figma-developer-mcp",
-        `--figma-api-key=${figmaApiKey}`,
-        "--stdio",
-      ],
+      args: ["-y", "figma-developer-mcp", `--figma-api-key=${figmaApiKey}`, "--stdio"],
     },
   });
 
@@ -38,16 +30,12 @@ async function invokeFigmaTool(
     const tools = await client.getTools();
     const target = tools.find((t: { name: string }) => t.name === toolName);
     if (!target) {
-      throw new Error(
-        `${toolName} tool not available from figma-developer-mcp`,
-      );
+      throw new Error(`${toolName} tool not available from figma-developer-mcp`);
     }
     return await target.invoke(args);
   } finally {
     // MCP client may have a close method; if so, call it
-    if (
-      typeof (client as unknown as Record<string, unknown>).close === "function"
-    ) {
+    if (typeof (client as unknown as Record<string, unknown>).close === "function") {
       await (client as unknown as { close: () => Promise<void> }).close();
     }
   }
@@ -57,9 +45,7 @@ function unwrapException(e: unknown): string {
   if (e instanceof Error) {
     // Handle AggregateError / ExceptionGroup
     if ("errors" in e && Array.isArray((e as { errors: Error[] }).errors)) {
-      return (e as { errors: Error[] }).errors
-        .map((sub) => sub.message)
-        .join("; ");
+      return (e as { errors: Error[] }).errors.map((sub) => sub.message).join("; ");
     }
     return e.message;
   }
@@ -80,11 +66,7 @@ const getFileSchema = z.object({
     .describe(
       "Optional node ID to scope the fetch to a specific frame or component (e.g. '1:23').",
     ),
-  depth: z
-    .number()
-    .int()
-    .optional()
-    .describe("Optional depth limit for nested elements."),
+  depth: z.number().int().optional().describe("Optional depth limit for nested elements."),
 });
 
 export const figmaGetFile = tool(
@@ -116,9 +98,7 @@ export const figmaGetFile = tool(
 
 const getComponentSchema = z.object({
   fileKey: z.string().describe("The Figma file key containing the component."),
-  componentId: z
-    .string()
-    .describe("The node ID of the component (e.g. '1:23')."),
+  componentId: z.string().describe("The node ID of the component (e.g. '1:23')."),
 });
 
 export const figmaGetComponent = tool(

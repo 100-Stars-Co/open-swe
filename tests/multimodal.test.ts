@@ -17,17 +17,13 @@ describe("extractImageUrls", () => {
   });
 
   it("ignores non-image URLs", () => {
-    const text =
-      "Not images: https://example.com/file.pdf and https://example.com/noext";
+    const text = "Not images: https://example.com/file.pdf and https://example.com/noext";
     expect(extractImageUrls(text)).toEqual([]);
   });
 
   it("extracts markdown syntax images", () => {
-    const text =
-      "Check out this screenshot: ![Screenshot](https://example.com/screenshot.png)";
-    expect(extractImageUrls(text)).toEqual([
-      "https://example.com/screenshot.png",
-    ]);
+    const text = "Check out this screenshot: ![Screenshot](https://example.com/screenshot.png)";
+    expect(extractImageUrls(text)).toEqual(["https://example.com/screenshot.png"]);
   });
 
   it("extracts direct image links", () => {
@@ -59,16 +55,14 @@ describe("extractImageUrls", () => {
   });
 
   it("handles URLs with query params", () => {
-    const text =
-      "Image with params: https://cdn.example.com/image.png?width=800&height=600";
+    const text = "Image with params: https://cdn.example.com/image.png?width=800&height=600";
     expect(extractImageUrls(text)).toEqual([
       "https://cdn.example.com/image.png?width=800&height=600",
     ]);
   });
 
   it("is case insensitive", () => {
-    const text =
-      "Mixed case: https://example.com/Image.PNG and https://example.com/photo.JpEg";
+    const text = "Mixed case: https://example.com/Image.PNG and https://example.com/photo.JpEg";
     expect(extractImageUrls(text)).toEqual([
       "https://example.com/Image.PNG",
       "https://example.com/photo.JpEg",
