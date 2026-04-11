@@ -133,7 +133,7 @@ This is an area where you can extend Open SWE for your org: add deterministic CI
 - **Instant acknowledgement** — reacts with 👀 the moment it picks up your message
 - **Message it while it's running** — send follow-up messages mid-task and it'll pick them up before its next step
 - **Run multiple tasks in parallel** — each task runs in its own isolated cloud sandbox
-- **Check thread state from the CLI** — run `bun run thread:state <thread-id>` to see whether a LangGraph thread is busy
+- **Check thread state from the CLI** — run `bun run thread:state <thread-id>` to see whether a worker thread is busy
 - **GitHub OAuth built-in** — authenticates with your GitHub account automatically
 - **Opens PRs automatically** — commits changes and opens a draft PR when done, linked back to your ticket
 - **Subagent support** — the agent can spawn child agents for parallel subtasks

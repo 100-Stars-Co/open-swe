@@ -370,13 +370,17 @@ TOKEN_ENCRYPTION_KEY=""                # Generate with: openssl rand -base64 32
 
 ## 7. Start the server
 
-Make sure ngrok is still running from step 2, then start the LangGraph server in a second terminal:
+Make sure ngrok is still running from step 2, then start the API server and worker in separate terminals:
 
 ```bash
-uv run langgraph dev --no-browser
+bun run dev
 ```
 
-The server runs on `http://localhost:2024` with these endpoints:
+```bash
+bun run worker
+```
+
+The API server runs on `http://localhost:8000` with these endpoints:
 
 | Endpoint | Purpose |
 |---|---|
@@ -428,25 +432,13 @@ The server runs on `http://localhost:2024` with these endpoints:
 
 ## 9. Production deployment
 
-For production, deploy the agent on [LangGraph Cloud](https://langchain-ai.github.io/langgraph/cloud/) instead of running locally:
+For production, deploy the Bun API server and the worker as separate processes:
 
 1. Push your code to a GitHub repository
-2. Connect the repo to LangGraph Cloud
+2. Provision Postgres and Redis
 3. Set all environment variables from step 6 in the deployment config
-4. Update your webhook URLs (Linear, Slack, Telegram, GitHub App) to point to your production URL (replace the ngrok URL)
-
-The `langgraph.json` at the project root already defines the graph entry point and HTTP app:
-
-```json
-{
-  "graphs": {
-    "agent": "agent.server:get_agent"
-  },
-  "http": {
-    "app": "agent.webapp:app"
-  }
-}
-```
+4. Run `bun run start` for the API service and `bun run worker` for the background worker
+5. Update your webhook URLs (Linear, Slack, Telegram, GitHub App) to point to your production URL (replace the ngrok URL)
 
 ## Troubleshooting
 

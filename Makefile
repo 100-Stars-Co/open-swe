@@ -1,6 +1,6 @@
 TEST_FILE ?= tests/
 
-.PHONY: all install dev run build test lint format format-check clean help
+.PHONY: all install dev run worker build test lint format format-check clean help
 
 all: help
 
@@ -12,10 +12,13 @@ install:
 	bun install
 
 dev:
-	bunx langgraph dev --port 2024
+	bun run --watch src/index.ts
 
 run:
-	bun src/webapp.ts
+	bun run src/index.ts
+
+worker:
+	bun run src/worker.ts
 
 build:
 	bun run tsc --noEmit
@@ -47,8 +50,9 @@ format-check:
 
 help:
 	@echo '----'
-	@echo 'dev                          - run LangGraph dev server'
-	@echo 'run                          - run webhook server'
+	@echo 'dev                          - run API server in watch mode'
+	@echo 'run                          - run API server'
+	@echo 'worker                       - run background worker'
 	@echo 'install                      - install dependencies'
 	@echo 'format                       - run code formatters'
 	@echo 'lint                         - run linters'

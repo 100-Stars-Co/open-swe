@@ -7,9 +7,9 @@
  */
 
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { Client } from "@langchain/langgraph-sdk";
 import { Hono } from "hono";
-import { queueMessageForThread } from "./middleware/checkMessageQueue.js";
+import { enqueueThreadRun, removeThreadRunJob } from "./queue/threadQueue.js";
+import { getAgentStateStore } from "./state/index.js";
 import { addReactionToComment, addReactionToIssue } from "./utils/github.js";
 import { getInstallationToken } from "./utils/githubApp.js";
 import { parseJiraCommentPayload, parseJiraIssuePayload } from "./utils/jiraWebhook.js";
@@ -59,14 +59,6 @@ app.get("/monitor", (c) => {
   return c.redirect("/monitor/");
 });
 
-// ─── LangGraph client ─────────────────────────────────────────────────────────
-
-function getLangGraphClient(): Client {
-  return new Client({
-    apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
-  });
-}
-
 // ─── Thread management ────────────────────────────────────────────────────────
 
 /**
@@ -88,58 +80,52 @@ function formatAsUuid(hex: string): string {
   ].join("-");
 }
 
-/**
- * Check whether a LangGraph thread is currently running (busy).
- */
 async function isThreadActive(threadId: string): Promise<boolean> {
-  try {
-    const client = getLangGraphClient();
-    const thread = await client.threads.get(threadId);
-    return (thread as unknown as Record<string, unknown>)?.status === "busy";
-  } catch {
-    return false;
-  }
+  const thread = await getAgentStateStore().getThread(threadId);
+  return thread?.status === "busy";
 }
 
-/**
- * Ensure a thread exists, creating it if not.
- */
-async function ensureThread(threadId: string): Promise<void> {
-  const client = getLangGraphClient();
-  try {
-    await client.threads.get(threadId);
-  } catch {
-    await client.threads.create({ threadId });
-  }
+function extractThreadFields(config?: Record<string, unknown>): {
+  source?: string | null;
+  repoOwner?: string | null;
+  repoName?: string | null;
+  issueNumber?: number | null;
+} {
+  const repo = config?.repo as { owner?: string; name?: string } | undefined;
+  const issueNumber =
+    typeof config?.issue_number === "number" ? (config.issue_number as number) : null;
+
+  return {
+    source: (config?.source as string | undefined) ?? null,
+    repoOwner: repo?.owner ?? null,
+    repoName: repo?.name ?? null,
+    issueNumber,
+  };
 }
 
-/**
- * Create a new agent run on a thread.
- */
-async function createRun(
-  threadId: string,
-  input: Record<string, unknown>,
-  config?: Record<string, unknown>,
-  runOptions?: Record<string, unknown>,
-): Promise<void> {
-  const client = getLangGraphClient();
-
-  // Store source in thread metadata for monitor display
-  if (config?.source) {
-    try {
-      await client.threads.update(threadId, {
-        metadata: { source: config.source as string },
-      });
-    } catch (err) {
-      console.warn(`[createRun] Failed to update thread metadata for ${threadId}:`, err);
-    }
-  }
-
-  await client.runs.create(threadId, "agent", {
-    input: { messages: [{ role: "human", content: input.message as string }] },
-    config: { configurable: config ?? {} },
-    ...(runOptions ?? {}),
+async function ensureThread(threadId: string, config?: Record<string, unknown>): Promise<void> {
+  const fields = extractThreadFields(config);
+  await getAgentStateStore().upsertThread({
+    threadId,
+    source: fields.source ?? null,
+    repoOwner: fields.repoOwner ?? null,
+    repoName: fields.repoName ?? null,
+    issueNumber: fields.issueNumber ?? null,
+    configurable: config ?? {},
+    metadata: config?.source ? { source: config.source as string } : undefined,
   });
+}
+
+async function enqueueAgentMessage(
+  threadId: string,
+  message: string,
+  config?: Record<string, unknown>,
+): Promise<void> {
+  await ensureThread(threadId, config);
+  await getAgentStateStore().enqueueMessage(threadId, message);
+  if (!(await isThreadActive(threadId))) {
+    await enqueueThreadRun(threadId);
+  }
 }
 
 // ─── Signature verification ───────────────────────────────────────────────────
@@ -190,19 +176,18 @@ app.get("/health", (c) => c.json({ status: "ok", service: "openswe-js" }));
  */
 app.get("/api/threads", async (c) => {
   try {
-    const client = getLangGraphClient();
-    const threads = await client.threads.search({ limit: 100 });
-
+    const threads = await getAgentStateStore().listThreads(100);
     const enrichedThreads = await Promise.all(
       threads.map(async (thread) => {
-        const threadId = thread.thread_id;
+        const threadId = thread.threadId;
         const sandboxMeta = await getSandboxMetadata(threadId);
         return {
           threadId,
-          status: (thread as unknown as Record<string, unknown>).status as string,
-          createdAt: (thread as unknown as Record<string, string>).created_at,
+          status: thread.status,
+          createdAt: thread.createdAt,
           metadata: {
-            ...(thread.metadata ?? {}),
+            ...thread.metadata,
+            source: thread.source,
             sandboxId: sandboxMeta.sandboxId,
             repoDir: sandboxMeta.repoDir,
             branchName: sandboxMeta.branchName,
@@ -225,26 +210,21 @@ app.get("/api/threads", async (c) => {
 app.get("/api/threads/:id", async (c) => {
   const threadId = c.req.param("id");
   try {
-    const client = getLangGraphClient();
-    const thread = await client.threads.get(threadId);
-    const sandboxMeta = await getSandboxMetadata(threadId);
-
-    // Get queued messages if any
-    let queuedMessages: unknown[] = [];
-    try {
-      const queueItem = await client.store.getItem(["queue", threadId], "pending_messages");
-      if (queueItem?.value) {
-        queuedMessages = (queueItem.value as { messages?: unknown[] }).messages ?? [];
-      }
-    } catch {
-      // No queue exists, that's fine
+    const thread = await getAgentStateStore().getThread(threadId);
+    if (!thread) {
+      return c.json({ error: "Thread not found" }, 404);
     }
+    const sandboxMeta = await getSandboxMetadata(threadId);
+    const queuedMessages = (await getAgentStateStore().listPendingMessages(threadId)).map(
+      (item) => item.message,
+    );
 
     return c.json({
-      threadId: thread.thread_id,
-      status: (thread as unknown as Record<string, unknown>).status,
+      threadId: thread.threadId,
+      status: thread.status,
       metadata: {
-        ...(thread.metadata ?? {}),
+        ...thread.metadata,
+        source: thread.source,
         sandboxId: sandboxMeta.sandboxId,
         repoDir: sandboxMeta.repoDir,
         branchName: sandboxMeta.branchName,
@@ -264,18 +244,15 @@ app.get("/api/threads/:id", async (c) => {
 app.get("/api/threads/:id/runs", async (c) => {
   const threadId = c.req.param("id");
   try {
-    const client = getLangGraphClient();
-    const runs = await client.runs.list(threadId);
+    const runs = await getAgentStateStore().listRuns(threadId);
 
-    const enrichedRuns = runs.map(
-      (run: { run_id: string; status: string; created_at?: string; updated_at?: string }) => ({
-        runId: run.run_id,
+    const enrichedRuns = runs.map((run) => ({
+        runId: run.runId,
         status: run.status,
-        traceUrl: getTraceUrl(run.run_id),
-        createdAt: run.created_at,
-        updatedAt: run.updated_at,
-      }),
-    );
+        traceUrl: getTraceUrl(run.runId),
+        createdAt: run.createdAt,
+        updatedAt: run.updatedAt,
+      }));
 
     return c.json({ runs: enrichedRuns });
   } catch (error) {
@@ -291,34 +268,23 @@ app.get("/api/threads/:id/runs", async (c) => {
 app.post("/api/threads/:id/stop", async (c) => {
   const threadId = c.req.param("id");
   try {
-    const client = getLangGraphClient();
+    const thread = await getAgentStateStore().getThread(threadId);
+    if (!thread) {
+      return c.json({ error: "Thread not found" }, 404);
+    }
 
-    // Get current thread status
-    const thread = await client.threads.get(threadId);
-    const status = (thread as unknown as Record<string, string>)?.status;
-
-    if (status !== "busy") {
+    if (thread.status !== "busy") {
       return c.json({ success: true, message: "Thread is not running" });
     }
 
-    // Cancel any active runs
-    const runs = await client.runs.list(threadId);
-    let cancelledCount = 0;
-    for (const run of runs) {
-      if (run.status === "pending" || run.status === "running") {
-        try {
-          await client.runs.cancel(threadId, run.run_id);
-          cancelledCount++;
-        } catch (cancelErr) {
-          console.warn(`[api/threads/${threadId}/stop] Failed to cancel run ${run.run_id}:`, cancelErr);
-        }
-      }
-    }
+    await getAgentStateStore().updateThread(threadId, {
+      interruptionRequested: true,
+    });
 
     return c.json({
       success: true,
-      message: `Stopped thread, cancelled ${cancelledCount} run(s)`,
-      cancelledRuns: cancelledCount,
+      message: "Stop requested for running thread",
+      cancelledRuns: 0,
     });
   } catch (error) {
     console.error(`[api/threads/${threadId}/stop] Error stopping thread:`, error);
@@ -334,33 +300,14 @@ app.delete("/api/threads/:id", async (c) => {
   const threadId = c.req.param("id");
   const forceDelete = c.req.query("force") === "true";
   try {
-    const client = getLangGraphClient();
-
-    // Check if thread exists
-    try {
-      await client.threads.get(threadId);
-    } catch {
-      // Thread doesn't exist, nothing to delete
+    const thread = await getAgentStateStore().getThread(threadId);
+    if (!thread) {
       return c.json({ success: true, message: "Thread not found" });
     }
+    await removeThreadRunJob(threadId).catch((err) => {
+      console.warn(`[api/threads/${threadId}] Failed to remove queued worker job:`, err);
+    });
 
-    // Cancel any active runs first
-    try {
-      const runs = await client.runs.list(threadId);
-      for (const run of runs) {
-        if (run.status === "pending" || run.status === "running") {
-          try {
-            await client.runs.cancel(threadId, run.run_id);
-          } catch (cancelErr) {
-            console.warn(`[api/threads/${threadId}] Failed to cancel run ${run.run_id}:`, cancelErr);
-          }
-        }
-      }
-    } catch (runsErr) {
-      console.warn(`[api/threads/${threadId}] Failed to list runs:`, runsErr);
-    }
-
-    // Get sandbox metadata first so cleanup can fail closed without losing the sandbox id.
     const sandboxMeta = await getSandboxMetadata(threadId);
 
     try {
@@ -380,8 +327,7 @@ app.delete("/api/threads/:id", async (c) => {
       }
     }
 
-    // Delete the thread from LangGraph once sandbox cleanup is complete or not needed.
-    await client.threads.delete(threadId);
+    await getAgentStateStore().deleteThread(threadId);
 
     return c.json({
       success: true,
@@ -458,7 +404,6 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
     }
 
     const threadId = generateGithubThreadId(owner, repoName, issue.number);
-    await ensureThread(threadId);
 
     const message = [
       `GitHub Issue #${issue.number} opened by @${issue.user.login}`,
@@ -468,16 +413,12 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
       .filter(Boolean)
       .join("\n");
 
-    await createRun(
-      threadId,
-      { message },
-      {
+    await enqueueAgentMessage(threadId, message, {
         thread_id: threadId,
         repo: { owner, name: repoName },
         issue_number: issue.number,
         source: "github",
-      },
-    );
+      });
     return;
   }
 
@@ -512,22 +453,12 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
       comment.body,
     ].join("\n");
 
-    const active = await isThreadActive(threadId);
-    if (active) {
-      await queueMessageForThread(threadId, message);
-    } else {
-      await ensureThread(threadId);
-      await createRun(
-        threadId,
-        { message },
-        {
-          thread_id: threadId,
-          repo: { owner, name: repoName },
-          issue_number: issue.number,
-          source: "github",
-        },
-      );
-    }
+    await enqueueAgentMessage(threadId, message, {
+      thread_id: threadId,
+      repo: { owner, name: repoName },
+      issue_number: issue.number,
+      source: "github",
+    });
     return;
   }
 
@@ -560,22 +491,12 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
       comment.body,
     ].join("\n");
 
-    const active = await isThreadActive(threadId);
-    if (active) {
-      await queueMessageForThread(threadId, message);
-    } else {
-      await ensureThread(threadId);
-      await createRun(
-        threadId,
-        { message },
-        {
-          thread_id: threadId,
-          repo: { owner, name: repoName },
-          issue_number: pr.number,
-          source: "github",
-        },
-      );
-    }
+    await enqueueAgentMessage(threadId, message, {
+      thread_id: threadId,
+      repo: { owner, name: repoName },
+      issue_number: pr.number,
+      source: "github",
+    });
   }
 }
 
@@ -614,8 +535,6 @@ async function handleJiraEvent(event: string, payload: Record<string, unknown>):
     const ctx = parseJiraIssuePayload(payload);
     if (!ctx) return;
 
-    await ensureThread(ctx.threadId);
-
     const message = [
       `Jira issue created: ${ctx.issueKey}`,
       `**Summary:** ${ctx.issueSummary}`,
@@ -625,17 +544,13 @@ async function handleJiraEvent(event: string, payload: Record<string, unknown>):
       .filter(Boolean)
       .join("\n");
 
-    await createRun(
-      ctx.threadId,
-      { message },
-      {
+    await enqueueAgentMessage(ctx.threadId, message, {
         thread_id: ctx.threadId,
         repo: { owner: repoOwner, name: repoName },
         source: "jira",
         jira_project_key: ctx.projectKey,
         jira_issue_key: ctx.issueKey,
-      },
-    );
+      });
     return;
   }
 
@@ -648,22 +563,12 @@ async function handleJiraEvent(event: string, payload: Record<string, unknown>):
       ctx.commentBody,
     ].join("\n");
 
-    const active = await isThreadActive(ctx.threadId);
-    if (active) {
-      await queueMessageForThread(ctx.threadId, message);
-    } else {
-      await ensureThread(ctx.threadId);
-      await createRun(
-        ctx.threadId,
-        { message },
-        {
-          thread_id: ctx.threadId,
-          repo: { owner: repoOwner, name: repoName },
-          source: "jira",
-          jira_issue_key: ctx.issueKey,
-        },
-      );
-    }
+    await enqueueAgentMessage(ctx.threadId, message, {
+      thread_id: ctx.threadId,
+      repo: { owner: repoOwner, name: repoName },
+      source: "jira",
+      jira_issue_key: ctx.issueKey,
+    });
   }
 }
 
@@ -719,8 +624,6 @@ async function handleTelegramUpdate(update: Record<string, unknown>): Promise<vo
   const threadId = generateThreadIdFromTelegramChat(chatId, messageThreadId);
   const senderName = ((message.from as Record<string, unknown>)?.first_name as string) ?? "User";
 
-  await ensureThread(threadId);
-
   const agentMessage = [
     "You were mentioned in Telegram.",
     "",
@@ -743,37 +646,16 @@ async function handleTelegramUpdate(update: Record<string, unknown>): Promise<vo
     .filter((value): value is string => typeof value === "string" && value.length > 0)
     .join("\n");
 
-  const active = await isThreadActive(threadId);
-  if (active) {
-    await queueMessageForThread(threadId, agentMessage);
-  } else {
-    await createRun(
-      threadId,
-      { message: agentMessage },
-      {
-        thread_id: threadId,
-        repo: { owner: repoConfig.owner, name: repoConfig.name },
-        source: "telegram",
-        telegram_chat: {
-          chat_id: chatId,
-          reply_to_message_id: messageId,
-          message_thread_id: messageThreadId,
-        },
-      },
-    );
-  }
-}
-
-// ─── Server ────────────────────────────────────────────────────────────────────
-
-const PORT = Number.parseInt(process.env.PORT ?? "8000", 10);
-
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  Bun.serve({
-    port: PORT,
-    fetch: app.fetch,
+  await enqueueAgentMessage(threadId, agentMessage, {
+    thread_id: threadId,
+    repo: { owner: repoConfig.owner, name: repoConfig.name },
+    source: "telegram",
+    telegram_chat: {
+      chat_id: chatId,
+      reply_to_message_id: messageId,
+      message_thread_id: messageThreadId,
+    },
   });
-  console.log(`[openswe-js] Webhook server running at http://localhost:${PORT}`);
 }
 
 export { app };

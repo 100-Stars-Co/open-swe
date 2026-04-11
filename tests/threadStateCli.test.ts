@@ -1,46 +1,12 @@
-import { afterEach, beforeEach, describe, expect, it, mock } from "bun:test";
-
-const state = {
-  threadStatus: "busy" as "busy" | "idle" | "interrupted" | "error" | "missing",
-  clientConfigs: [] as Array<{ apiUrl?: string } | undefined>,
-};
-
-mock.module("@langchain/langgraph-sdk", () => ({
-  Client: class MockClient {
-    threads = {
-      get: async (threadId: string) => {
-        if (state.threadStatus === "missing") {
-          const err = new Error(`HTTP 404: thread ${threadId} not found`) as Error & {
-            status?: number;
-          };
-          err.status = 404;
-          throw err;
-        }
-
-        return {
-          thread_id: threadId,
-          status: state.threadStatus,
-        };
-      },
-    };
-
-    constructor(config?: { apiUrl?: string }) {
-      state.clientConfigs.push(config);
-    }
-  },
-}));
+import { beforeEach, describe, expect, it } from "bun:test";
+import { resetAgentStateStoreForTests, getAgentStateStore } from "../src/state/index.js";
+import { InMemoryAgentStateStore } from "../src/state/inMemoryState.js";
 
 const { formatThreadState, runThreadStateCli } = await import("../src/cli/threadState.js");
 
 describe("thread state cli", () => {
   beforeEach(() => {
-    state.threadStatus = "busy";
-    state.clientConfigs = [];
-    process.env.LANGGRAPH_API_URL = "http://langgraph.example.test:8123";
-  });
-
-  afterEach(() => {
-    delete process.env.LANGGRAPH_API_URL;
+    resetAgentStateStoreForTests(new InMemoryAgentStateStore());
   });
 
   it("formats busy threads", () => {
@@ -48,7 +14,7 @@ describe("thread state cli", () => {
   });
 
   it("reports idle threads as not busy", async () => {
-    state.threadStatus = "idle";
+    await getAgentStateStore().upsertThread({ threadId: "thread-1", status: "idle" });
     const output: string[] = [];
     const exitCode = await runThreadStateCli(["thread-1"], {
       stdout: (line) => output.push(line),
@@ -57,11 +23,9 @@ describe("thread state cli", () => {
 
     expect(exitCode).toBe(0);
     expect(output).toEqual(["Thread thread-1: not busy (idle)"]);
-    expect(state.clientConfigs).toEqual([{ apiUrl: "http://langgraph.example.test:8123" }]);
   });
 
   it("reports missing threads", async () => {
-    state.threadStatus = "missing";
     const output: string[] = [];
     const exitCode = await runThreadStateCli(["missing-thread"], {
       stdout: (line) => output.push(line),

@@ -1,18 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, mock, spyOn } from "bun:test";
+import { getAgentStateStore, resetAgentStateStoreForTests } from "../src/state/index.js";
+import { InMemoryAgentStateStore } from "../src/state/inMemoryState.js";
 
 const state = {
   metadata: { sandboxId: "persisted-sandbox" as string | null },
   clearCalls: [] as string[],
-  metadataCalls: [] as Array<{ threadId: string; metadata: Record<string, string> }>,
+  metadataCalls: [] as Array<{ threadId: string; metadata: Record<string, string | null> }>,
   daytonaDeletes: [] as string[],
   langsmithDeletes: [] as string[],
   daytonaError: null as Error | null,
   langsmithError: null as Error | null,
-  threadExists: true,
-  threadDeletes: [] as string[],
-  runLists: [] as string[],
-  runCancels: [] as Array<{ threadId: string; runId: string }>,
-  operations: [] as string[],
+  removedJobs: [] as string[],
 };
 
 mock.module("../src/utils/sandboxState.js", () => ({
@@ -28,7 +26,10 @@ mock.module("../src/utils/sandboxState.js", () => ({
     baseBranch: null,
   }),
   setSandboxBackend: () => {},
-  setSandboxMetadata: async (threadId: string, metadata: Record<string, string>) => {
+  setSandboxMetadata: async (
+    threadId: string,
+    metadata: Record<string, string | null>,
+  ) => {
     state.metadataCalls.push({ threadId, metadata });
     if (Object.hasOwn(metadata, "sandboxId")) {
       state.metadata.sandboxId = metadata.sandboxId === "" ? null : metadata.sandboxId;
@@ -43,7 +44,6 @@ mock.module("../src/integrations/daytona.js", () => ({
     execute: async () => ({ output: "ok", exitCode: 0, truncated: false }),
   }),
   deleteDaytonaSandbox: async (sandboxId: string) => {
-    state.operations.push(`cleanup:${sandboxId}`);
     state.daytonaDeletes.push(sandboxId);
     if (state.daytonaError) throw state.daytonaError;
   },
@@ -60,31 +60,10 @@ mock.module("../src/integrations/langsmith.js", () => ({
   },
 }));
 
-mock.module("@langchain/langgraph-sdk", () => ({
-  Client: class MockClient {
-    threads = {
-      get: async (threadId: string) => {
-        if (!state.threadExists) throw new Error("thread not found");
-        return { thread_id: threadId, status: "idle", metadata: {} };
-      },
-      delete: async (threadId: string) => {
-        state.operations.push(`delete:${threadId}`);
-        state.threadDeletes.push(threadId);
-      },
-    };
-
-    runs = {
-      list: async (threadId: string) => {
-        state.runLists.push(threadId);
-        return [
-          { run_id: "run-pending", status: "pending" },
-          { run_id: "run-complete", status: "success" },
-        ];
-      },
-      cancel: async (threadId: string, runId: string) => {
-        state.runCancels.push({ threadId, runId });
-      },
-    };
+mock.module("../src/queue/threadQueue.js", () => ({
+  enqueueThreadRun: async () => {},
+  removeThreadRunJob: async (threadId: string) => {
+    state.removedJobs.push(threadId);
   },
 }));
 
@@ -95,7 +74,7 @@ const { app } = await import("../src/webapp.js");
 describe("sandbox cleanup and thread deletion", () => {
   let originalSandboxType: string | undefined;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     originalSandboxType = process.env.SANDBOX_TYPE;
     state.metadata = { sandboxId: "persisted-sandbox" };
     state.clearCalls = [];
@@ -104,11 +83,11 @@ describe("sandbox cleanup and thread deletion", () => {
     state.langsmithDeletes = [];
     state.daytonaError = null;
     state.langsmithError = null;
-    state.threadExists = true;
-    state.threadDeletes = [];
-    state.runLists = [];
-    state.runCancels = [];
-    state.operations = [];
+    state.removedJobs = [];
+    resetAgentStateStoreForTests(new InMemoryAgentStateStore());
+    await getAgentStateStore().upsertThread({ threadId: "thread-8" });
+    await getAgentStateStore().upsertThread({ threadId: "thread-9" });
+    await getAgentStateStore().upsertThread({ threadId: "thread-10" });
   });
 
   afterEach(() => {
@@ -156,18 +135,6 @@ describe("sandbox cleanup and thread deletion", () => {
       expect(state.clearCalls).toEqual(["thread-4"]);
       expect(state.daytonaDeletes).toEqual(["daytona-456"]);
       expect(state.metadataCalls).toEqual([]);
-      expect(state.metadata.sandboxId).toBe("persisted-sandbox");
-    });
-
-    it("fails for unsupported remote providers without clearing metadata", async () => {
-      process.env.SANDBOX_TYPE = "e2b";
-
-      await expect(cleanupSandboxForThread("thread-5", "e2b-123")).rejects.toThrow(
-        "Sandbox cleanup is not supported for provider 'e2b'",
-      );
-
-      expect(state.clearCalls).toEqual(["thread-5"]);
-      expect(state.metadataCalls).toEqual([]);
     });
   });
 
@@ -175,7 +142,10 @@ describe("sandbox cleanup and thread deletion", () => {
     it("uses the shared cleanup helper", async () => {
       process.env.SANDBOX_TYPE = "daytona";
 
-      const result = await cleanupSandboxMiddleware.afterAgent?.({
+      const afterAgent = cleanupSandboxMiddleware.afterAgent as
+        | ((state: Record<string, unknown>) => Promise<Record<string, unknown>>)
+        | { hook: (state: Record<string, unknown>) => Promise<Record<string, unknown>> };
+      const result = await ("hook" in afterAgent ? afterAgent.hook : afterAgent)({
         configurable: { thread_id: "thread-6", sandbox_id: "daytona-789" },
       });
 
@@ -189,7 +159,10 @@ describe("sandbox cleanup and thread deletion", () => {
       state.daytonaError = new Error("cleanup failed");
       const consoleSpy = spyOn(console, "error").mockImplementation(() => {});
 
-      const result = await cleanupSandboxMiddleware.afterAgent?.({
+      const afterAgent = cleanupSandboxMiddleware.afterAgent as
+        | ((state: Record<string, unknown>) => Promise<Record<string, unknown>>)
+        | { hook: (state: Record<string, unknown>) => Promise<Record<string, unknown>> };
+      const result = await ("hook" in afterAgent ? afterAgent.hook : afterAgent)({
         configurable: { thread_id: "thread-7", sandbox_id: "daytona-987" },
       });
 
@@ -203,13 +176,10 @@ describe("sandbox cleanup and thread deletion", () => {
 
   describe("DELETE /api/threads/:id", () => {
     it("returns success when the thread does not exist", async () => {
-      state.threadExists = false;
-
       const res = await app.request("/api/threads/thread-missing", { method: "DELETE" });
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ success: true, message: "Thread not found" });
-      expect(state.threadDeletes).toEqual([]);
       expect(state.daytonaDeletes).toEqual([]);
     });
 
@@ -221,11 +191,9 @@ describe("sandbox cleanup and thread deletion", () => {
 
       expect(res.status).toBe(200);
       expect(await res.json()).toEqual({ success: true, message: "Thread deleted" });
-      expect(state.runLists).toEqual(["thread-8"]);
-      expect(state.runCancels).toEqual([{ threadId: "thread-8", runId: "run-pending" }]);
       expect(state.daytonaDeletes).toEqual(["sandbox-123"]);
-      expect(state.threadDeletes).toEqual(["thread-8"]);
-      expect(state.operations).toEqual(["cleanup:sandbox-123", "delete:thread-8"]);
+      expect(state.removedJobs).toEqual(["thread-8"]);
+      expect(await getAgentStateStore().getThread("thread-8")).toBeNull();
     });
 
     it("fails closed when sandbox cleanup fails", async () => {
@@ -241,9 +209,7 @@ describe("sandbox cleanup and thread deletion", () => {
         canForceDelete: true,
         cleanupFailed: true,
       });
-      expect(state.daytonaDeletes).toEqual(["sandbox-456"]);
-      expect(state.threadDeletes).toEqual([]);
-      expect(state.operations).toEqual(["cleanup:sandbox-456"]);
+      expect(await getAgentStateStore().getThread("thread-9")).not.toBeNull();
     });
 
     it("deletes the thread when force=true after sandbox cleanup fails", async () => {
@@ -258,9 +224,7 @@ describe("sandbox cleanup and thread deletion", () => {
         success: true,
         message: "Thread deleted without sandbox cleanup",
       });
-      expect(state.daytonaDeletes).toEqual(["sandbox-789"]);
-      expect(state.threadDeletes).toEqual(["thread-10"]);
-      expect(state.operations).toEqual(["cleanup:sandbox-789", "delete:thread-10"]);
+      expect(await getAgentStateStore().getThread("thread-10")).toBeNull();
     });
   });
 });

@@ -1,10 +1,10 @@
-import { Client, type ThreadStatus } from "@langchain/langgraph-sdk";
+import { getAgentStateStore, type AgentThreadStatus } from "../state/index.js";
 
-const KNOWN_THREAD_STATUSES = new Set<ThreadStatus>(["idle", "busy", "interrupted", "error"]);
+const KNOWN_THREAD_STATUSES = new Set<AgentThreadStatus>(["idle", "busy", "interrupted", "error"]);
 
 interface ThreadLookupResult {
   threadId: string;
-  status: ThreadStatus | "missing";
+  status: AgentThreadStatus | "missing";
 }
 
 interface CliIO {
@@ -12,40 +12,17 @@ interface CliIO {
   stderr: (line: string) => void;
 }
 
-function getLangGraphClient(): Client {
-  return new Client({
-    apiUrl: process.env.LANGGRAPH_API_URL ?? "http://localhost:2024",
-  });
-}
-
-function isThreadNotFoundError(err: unknown): boolean {
-  if (!err || typeof err !== "object") return false;
-
-  const record = err as Record<string, unknown>;
-  if (record.status === 404) return true;
-
-  const message = err instanceof Error ? err.message : String(err);
-  return /\bHTTP 404\b/i.test(message) || /not found/i.test(message);
-}
-
 async function fetchThreadStatus(threadId: string): Promise<ThreadLookupResult> {
-  const client = getLangGraphClient();
-
-  try {
-    const thread = await client.threads.get(threadId);
-    const status = thread?.status;
-
-    if (typeof status !== "string" || !KNOWN_THREAD_STATUSES.has(status as ThreadStatus)) {
-      throw new Error(`Unexpected thread status for ${threadId}`);
-    }
-
-    return { threadId, status: status as ThreadStatus };
-  } catch (err) {
-    if (isThreadNotFoundError(err)) {
-      return { threadId, status: "missing" };
-    }
-    throw err;
+  const thread = await getAgentStateStore().getThread(threadId);
+  if (!thread) {
+    return { threadId, status: "missing" };
   }
+
+  if (!KNOWN_THREAD_STATUSES.has(thread.status)) {
+    throw new Error(`Unexpected thread status for ${threadId}`);
+  }
+
+  return { threadId, status: thread.status };
 }
 
 export function formatThreadState(result: ThreadLookupResult): string {
