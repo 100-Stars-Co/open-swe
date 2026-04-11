@@ -59,10 +59,7 @@ describe("getOrCreateSandbox", () => {
     const sandbox = await getOrCreateSandbox("thread-1");
 
     expect(sandbox.id).toBe("fresh-sandbox");
-    expect(state.createCalls).toEqual([
-      { sandboxId: "dead-sandbox" },
-      { sandboxId: undefined },
-    ]);
+    expect(state.createCalls).toEqual([{ sandboxId: "dead-sandbox" }, { sandboxId: undefined }]);
     expect(state.clearCalls).toEqual(["thread-1"]);
     expect(state.executeCalls).toEqual(["echo ok"]);
     expect(state.metadataCalls).toEqual([

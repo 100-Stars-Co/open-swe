@@ -11,6 +11,7 @@
     "build": "tsc --noEmit",
     "run": "bun src/webapp.ts",
     "start": "bun src/webapp.ts",
+    "thread:state": "bun src/cli/threadState.ts",
     "compile": "tsc",
     "test": "bun test",
     "test:watch": "bun test --watch",

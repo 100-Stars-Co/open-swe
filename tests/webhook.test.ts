@@ -75,6 +75,7 @@ mock.module("@langchain/langgraph-sdk", () => ({
         }
         return { status: state.threadStatus };
       },
+      update: async () => ({}),
       create: async ({ threadId }: { threadId: string }) => {
         state.threadCreates.push(threadId);
         return { threadId };
@@ -354,7 +355,53 @@ describe("webhook signature verification", () => {
       });
     });
 
-    it("queues the message when an issue comment arrives for a busy thread", async () => {
+    it("reacts and creates a run for an edited issue comment mentioning the bot", async () => {
+      state.threadStatus = "idle";
+      const payload = JSON.stringify({
+        action: "edited",
+        repository: { owner: { login: "100-Stars-Co" }, name: "goal-tracking-agent-frontend" },
+        issue: { number: 48 },
+        comment: {
+          id: 781,
+          body: "@openswe please follow up after the edit",
+          user: { login: "puvanath" },
+        },
+      });
+
+      const res = await app.request("/webhooks/github", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "issue_comment",
+          "x-hub-signature-256": makeGithubSignature(payload),
+        },
+        body: payload,
+      });
+
+      expect(res.status).toBe(200);
+      await flushAsyncWork();
+
+      expect(state.commentReactions).toEqual([
+        {
+          owner: "100-Stars-Co",
+          repo: "goal-tracking-agent-frontend",
+          commentId: 781,
+          reaction: "eyes",
+          token: "installation-token",
+        },
+      ]);
+      expect(state.runCreates).toHaveLength(1);
+      expect(state.runCreates[0]?.payload.input).toEqual({
+        messages: [
+          {
+            role: "human",
+            content: "Comment by @puvanath on issue #48:\n@openswe please follow up after the edit",
+          },
+        ],
+      });
+    });
+
+    it("enqueues the run when an issue comment arrives for a busy thread", async () => {
       state.threadStatus = "busy";
       const payload = JSON.stringify({
         action: "created",
@@ -381,13 +428,56 @@ describe("webhook signature verification", () => {
       await flushAsyncWork();
 
       expect(state.commentReactions).toHaveLength(1);
-      expect(state.queuedMessages).toEqual([
+      expect(state.queuedMessages).toHaveLength(1);
+      expect(state.runCreates).toHaveLength(0);
+      expect(state.queuedMessages[0]).toEqual({
+        threadId: expect.any(String),
+        message: "Comment by @puvanath on issue #45:\n@openswe there is more work",
+      });
+    });
+
+    it("enqueues the run when an edited PR review comment arrives for a busy thread", async () => {
+      state.threadStatus = "busy";
+      const payload = JSON.stringify({
+        action: "edited",
+        repository: { owner: { login: "100-Stars-Co" }, name: "goal-tracking-agent-frontend" },
+        pull_request: { number: 52 },
+        comment: {
+          id: 782,
+          body: "@openswe please revise this after editing",
+          user: { login: "puvanath" },
+        },
+      });
+
+      const res = await app.request("/webhooks/github", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-github-event": "pull_request_review_comment",
+          "x-hub-signature-256": makeGithubSignature(payload),
+        },
+        body: payload,
+      });
+
+      expect(res.status).toBe(200);
+      await flushAsyncWork();
+
+      expect(state.commentReactions).toEqual([
         {
-          threadId: state.threadGets[0] ?? "",
-          message: "Comment by @puvanath on issue #45:\n@openswe there is more work",
+          owner: "100-Stars-Co",
+          repo: "goal-tracking-agent-frontend",
+          commentId: 782,
+          reaction: "eyes",
+          token: "installation-token",
         },
       ]);
+      expect(state.queuedMessages).toHaveLength(1);
       expect(state.runCreates).toHaveLength(0);
+      expect(state.queuedMessages[0]).toEqual({
+        threadId: expect.any(String),
+        message:
+          "PR review comment by @puvanath on PR #52:\n@openswe please revise this after editing",
+      });
     });
 
     it("ignores PR issue_comment events", async () => {

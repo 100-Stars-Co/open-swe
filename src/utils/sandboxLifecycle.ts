@@ -18,6 +18,7 @@ import {
 } from "./sandboxState.js";
 
 const DEFAULT_SANDBOX_CREATION_TIMEOUT_MS = 180_000;
+const REMOTE_SANDBOX_TYPES = new Set(["daytona", "langsmith", "e2b", "opensandbox"]);
 
 function isMissingSandboxError(err: unknown): boolean {
   const message =
@@ -28,6 +29,46 @@ function isMissingSandboxError(err: unknown): boolean {
 async function clearSandboxState(threadId: string): Promise<void> {
   deleteSandboxBackend(threadId);
   await setSandboxMetadata(threadId, { sandboxId: "" }).catch(() => {});
+}
+
+export async function cleanupSandboxForThread(
+  threadId: string,
+  sandboxId?: string | null,
+): Promise<void> {
+  deleteSandboxBackend(threadId);
+
+  const resolvedSandboxId = sandboxId ?? (await getSandboxMetadata(threadId)).sandboxId;
+  if (!resolvedSandboxId) {
+    await setSandboxMetadata(threadId, { sandboxId: "" }).catch(() => {});
+    return;
+  }
+
+  const sandboxType = process.env.SANDBOX_TYPE ?? "local";
+
+  if (sandboxType === "local") {
+    await setSandboxMetadata(threadId, { sandboxId: "" }).catch(() => {});
+    return;
+  }
+
+  if (sandboxType === "daytona") {
+    const { deleteDaytonaSandbox } = await import("../integrations/daytona.js");
+    await deleteDaytonaSandbox(resolvedSandboxId);
+    await setSandboxMetadata(threadId, { sandboxId: "" }).catch(() => {});
+    return;
+  }
+
+  if (sandboxType === "langsmith") {
+    const { deleteLangsmithSandbox } = await import("../integrations/langsmith.js");
+    await deleteLangsmithSandbox(resolvedSandboxId);
+    await setSandboxMetadata(threadId, { sandboxId: "" }).catch(() => {});
+    return;
+  }
+
+  if (REMOTE_SANDBOX_TYPES.has(sandboxType)) {
+    throw new Error(`Sandbox cleanup is not supported for provider '${sandboxType}'`);
+  }
+
+  throw new Error(`Unknown SANDBOX_TYPE '${sandboxType}'`);
 }
 
 async function createAndVerifySandbox(

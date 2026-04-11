@@ -327,8 +327,12 @@ export async function deleteLangsmithSandbox(sandboxId: string): Promise<void> {
     const proto = LangSmithSandbox as any;
     if (typeof proto.delete === "function") {
       await proto.delete({ id: sandboxId });
+      return;
     }
+    throw new Error("LangSmith sandbox deletion is not supported by the installed SDK");
   } catch (err) {
-    console.error(`[langsmith] Failed to delete sandbox ${sandboxId}:`, err);
+    throw new Error(
+      `[langsmith] Failed to delete sandbox ${sandboxId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }

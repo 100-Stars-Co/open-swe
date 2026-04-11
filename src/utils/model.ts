@@ -34,11 +34,8 @@ export async function makeModel(
     }) as BaseChatModel;
   }
 
-  return (await initChatModel(
-    modelId,
-    {
-      ...callbackOptions,
-      ...options,
-    } as never,
-  )) as BaseChatModel;
+  return (await initChatModel(modelId, {
+    ...callbackOptions,
+    ...options,
+  } as never)) as BaseChatModel;
 }

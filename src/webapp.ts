@@ -7,13 +7,14 @@
  */
 
 import { createHash, createHmac, timingSafeEqual } from "node:crypto";
-import { serve } from "@hono/node-server";
 import { Client } from "@langchain/langgraph-sdk";
 import { Hono } from "hono";
 import { queueMessageForThread } from "./middleware/checkMessageQueue.js";
 import { addReactionToComment, addReactionToIssue } from "./utils/github.js";
 import { getInstallationToken } from "./utils/githubApp.js";
 import { parseJiraCommentPayload, parseJiraIssuePayload } from "./utils/jiraWebhook.js";
+import { cleanupSandboxForThread } from "./utils/sandboxLifecycle.js";
+import { getSandboxMetadata } from "./utils/sandboxState.js";
 import {
   generateThreadIdFromTelegramChat,
   getTelegramRepoConfig,
@@ -21,8 +22,42 @@ import {
   stripBotMention,
   verifyTelegramSecret,
 } from "./utils/telegram.js";
+import { getTraceUrl } from "./utils/tracing.js";
 
 const app = new Hono();
+
+// ─── Static files for monitor dashboard ─────────────────────────────────────────
+// Explicit routes for monitor assets to ensure correct resolution
+
+app.get("/monitor/", async (c) => {
+  try {
+    const filePath = new URL("./monitor/index.html", import.meta.url);
+    const file = Bun.file(filePath);
+    const html = await file.text();
+    return c.html(html);
+  } catch (err) {
+    console.error("Error serving monitor page:", err);
+    return c.text("Error loading dashboard", 500);
+  }
+});
+
+app.get("/monitor/app.js", async (c) => {
+  try {
+    const filePath = new URL("./monitor/app.js", import.meta.url);
+    const file = Bun.file(filePath);
+    const content = await file.text();
+    return c.body(content, {
+      headers: { "Content-Type": "application/javascript; charset=UTF-8" },
+    });
+  } catch (err) {
+    console.error("Error serving app.js:", err);
+    return c.text("Error loading script", 500);
+  }
+});
+
+app.get("/monitor", (c) => {
+  return c.redirect("/monitor/");
+});
 
 // ─── LangGraph client ─────────────────────────────────────────────────────────
 
@@ -85,11 +120,25 @@ async function createRun(
   threadId: string,
   input: Record<string, unknown>,
   config?: Record<string, unknown>,
+  runOptions?: Record<string, unknown>,
 ): Promise<void> {
   const client = getLangGraphClient();
+
+  // Store source in thread metadata for monitor display
+  if (config?.source) {
+    try {
+      await client.threads.update(threadId, {
+        metadata: { source: config.source as string },
+      });
+    } catch (err) {
+      console.warn(`[createRun] Failed to update thread metadata for ${threadId}:`, err);
+    }
+  }
+
   await client.runs.create(threadId, "agent", {
     input: { messages: [{ role: "human", content: input.message as string }] },
     config: { configurable: config ?? {} },
+    ...(runOptions ?? {}),
   });
 }
 
@@ -132,6 +181,217 @@ function isOrgAllowed(owner: string): boolean {
 // ─── Health check ─────────────────────────────────────────────────────────────
 
 app.get("/health", (c) => c.json({ status: "ok", service: "openswe-js" }));
+
+// ─── Thread Monitoring API ────────────────────────────────────────────────────
+
+/**
+ * List all threads with their status and metadata.
+ * Returns threads sorted by most recently active.
+ */
+app.get("/api/threads", async (c) => {
+  try {
+    const client = getLangGraphClient();
+    const threads = await client.threads.search({ limit: 100 });
+
+    const enrichedThreads = await Promise.all(
+      threads.map(async (thread) => {
+        const threadId = thread.thread_id;
+        const sandboxMeta = await getSandboxMetadata(threadId);
+        return {
+          threadId,
+          status: (thread as unknown as Record<string, unknown>).status as string,
+          createdAt: (thread as unknown as Record<string, string>).created_at,
+          metadata: {
+            ...(thread.metadata ?? {}),
+            sandboxId: sandboxMeta.sandboxId,
+            repoDir: sandboxMeta.repoDir,
+            branchName: sandboxMeta.branchName,
+            baseBranch: sandboxMeta.baseBranch,
+          },
+        };
+      }),
+    );
+
+    return c.json({ threads: enrichedThreads });
+  } catch (error) {
+    console.error("[api/threads] Error fetching threads:", error);
+    return c.json({ error: "Failed to fetch threads" }, 500);
+  }
+});
+
+/**
+ * Get detailed information about a specific thread.
+ */
+app.get("/api/threads/:id", async (c) => {
+  const threadId = c.req.param("id");
+  try {
+    const client = getLangGraphClient();
+    const thread = await client.threads.get(threadId);
+    const sandboxMeta = await getSandboxMetadata(threadId);
+
+    // Get queued messages if any
+    let queuedMessages: unknown[] = [];
+    try {
+      const queueItem = await client.store.getItem(["queue", threadId], "pending_messages");
+      if (queueItem?.value) {
+        queuedMessages = (queueItem.value as { messages?: unknown[] }).messages ?? [];
+      }
+    } catch {
+      // No queue exists, that's fine
+    }
+
+    return c.json({
+      threadId: thread.thread_id,
+      status: (thread as unknown as Record<string, unknown>).status,
+      metadata: {
+        ...(thread.metadata ?? {}),
+        sandboxId: sandboxMeta.sandboxId,
+        repoDir: sandboxMeta.repoDir,
+        branchName: sandboxMeta.branchName,
+        baseBranch: sandboxMeta.baseBranch,
+      },
+      queuedMessages,
+    });
+  } catch (error) {
+    console.error(`[api/threads/${threadId}] Error fetching thread:`, error);
+    return c.json({ error: "Thread not found" }, 404);
+  }
+});
+
+/**
+ * Get event/runs history for a thread.
+ */
+app.get("/api/threads/:id/runs", async (c) => {
+  const threadId = c.req.param("id");
+  try {
+    const client = getLangGraphClient();
+    const runs = await client.runs.list(threadId);
+
+    const enrichedRuns = runs.map(
+      (run: { run_id: string; status: string; created_at?: string; updated_at?: string }) => ({
+        runId: run.run_id,
+        status: run.status,
+        traceUrl: getTraceUrl(run.run_id),
+        createdAt: run.created_at,
+        updatedAt: run.updated_at,
+      }),
+    );
+
+    return c.json({ runs: enrichedRuns });
+  } catch (error) {
+    console.error(`[api/threads/${threadId}/runs] Error fetching runs:`, error);
+    return c.json({ runs: [] });
+  }
+});
+
+/**
+ * Interrupt/stop a running thread without deleting it.
+ * Cancels any active runs for the thread.
+ */
+app.post("/api/threads/:id/stop", async (c) => {
+  const threadId = c.req.param("id");
+  try {
+    const client = getLangGraphClient();
+
+    // Get current thread status
+    const thread = await client.threads.get(threadId);
+    const status = (thread as unknown as Record<string, string>)?.status;
+
+    if (status !== "busy") {
+      return c.json({ success: true, message: "Thread is not running" });
+    }
+
+    // Cancel any active runs
+    const runs = await client.runs.list(threadId);
+    let cancelledCount = 0;
+    for (const run of runs) {
+      if (run.status === "pending" || run.status === "running") {
+        try {
+          await client.runs.cancel(threadId, run.run_id);
+          cancelledCount++;
+        } catch (cancelErr) {
+          console.warn(`[api/threads/${threadId}/stop] Failed to cancel run ${run.run_id}:`, cancelErr);
+        }
+      }
+    }
+
+    return c.json({
+      success: true,
+      message: `Stopped thread, cancelled ${cancelledCount} run(s)`,
+      cancelledRuns: cancelledCount,
+    });
+  } catch (error) {
+    console.error(`[api/threads/${threadId}/stop] Error stopping thread:`, error);
+    return c.json({ error: "Failed to stop thread" }, 500);
+  }
+});
+
+/**
+ * Delete a thread and its associated sandbox.
+ * Also cancels any active runs before deletion.
+ */
+app.delete("/api/threads/:id", async (c) => {
+  const threadId = c.req.param("id");
+  const forceDelete = c.req.query("force") === "true";
+  try {
+    const client = getLangGraphClient();
+
+    // Check if thread exists
+    try {
+      await client.threads.get(threadId);
+    } catch {
+      // Thread doesn't exist, nothing to delete
+      return c.json({ success: true, message: "Thread not found" });
+    }
+
+    // Cancel any active runs first
+    try {
+      const runs = await client.runs.list(threadId);
+      for (const run of runs) {
+        if (run.status === "pending" || run.status === "running") {
+          try {
+            await client.runs.cancel(threadId, run.run_id);
+          } catch (cancelErr) {
+            console.warn(`[api/threads/${threadId}] Failed to cancel run ${run.run_id}:`, cancelErr);
+          }
+        }
+      }
+    } catch (runsErr) {
+      console.warn(`[api/threads/${threadId}] Failed to list runs:`, runsErr);
+    }
+
+    // Get sandbox metadata first so cleanup can fail closed without losing the sandbox id.
+    const sandboxMeta = await getSandboxMetadata(threadId);
+
+    try {
+      await cleanupSandboxForThread(threadId, sandboxMeta.sandboxId);
+    } catch (cleanupErr) {
+      const message = cleanupErr instanceof Error ? cleanupErr.message : String(cleanupErr);
+      console.error(`[api/threads/${threadId}] Sandbox cleanup failed:`, cleanupErr);
+      if (!forceDelete) {
+        return c.json(
+          {
+            error: `Failed to clean up sandbox: ${message}`,
+            canForceDelete: true,
+            cleanupFailed: true,
+          },
+          500,
+        );
+      }
+    }
+
+    // Delete the thread from LangGraph once sandbox cleanup is complete or not needed.
+    await client.threads.delete(threadId);
+
+    return c.json({
+      success: true,
+      message: forceDelete ? "Thread deleted without sandbox cleanup" : "Thread deleted",
+    });
+  } catch (error) {
+    console.error(`[api/threads/${threadId}] Error deleting thread:`, error);
+    return c.json({ error: "Failed to delete thread" }, 500);
+  }
+});
 
 // ─── GitHub webhooks ──────────────────────────────────────────────────────────
 
@@ -222,7 +482,7 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
   }
 
   // Issue comment containing @mention
-  if (event === "issue_comment" && action === "created") {
+  if (event === "issue_comment" && (action === "created" || action === "edited")) {
     const issue = payload.issue as { number: number; pull_request?: unknown };
     const comment = payload.comment as {
       id: number;
@@ -247,7 +507,6 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
     }
 
     const threadId = generateGithubThreadId(owner, repoName, issue.number);
-
     const message = [
       `Comment by @${comment.user.login} on issue #${issue.number}:`,
       comment.body,
@@ -273,7 +532,7 @@ async function handleGithubEvent(event: string, payload: Record<string, unknown>
   }
 
   // PR review comment mentioning the bot
-  if (event === "pull_request_review_comment" && action === "created") {
+  if (event === "pull_request_review_comment" && (action === "created" || action === "edited")) {
     const pr = payload.pull_request as { number: number };
     const comment = payload.comment as {
       id: number;
@@ -510,9 +769,11 @@ async function handleTelegramUpdate(update: Record<string, unknown>): Promise<vo
 const PORT = Number.parseInt(process.env.PORT ?? "8000", 10);
 
 if (process.argv[1] === new URL(import.meta.url).pathname) {
-  serve({ fetch: app.fetch, port: PORT }, (info) => {
-    console.log(`[openswe-js] Webhook server running at http://localhost:${info.port}`);
+  Bun.serve({
+    port: PORT,
+    fetch: app.fetch,
   });
+  console.log(`[openswe-js] Webhook server running at http://localhost:${PORT}`);
 }
 
 export { app };

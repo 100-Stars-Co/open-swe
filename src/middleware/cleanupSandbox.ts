@@ -2,13 +2,12 @@
  * Cleanup sandbox middleware — fires after agent loop finishes.
  * Mirrors agent/middleware/cleanup_sandbox.py
  *
- * Only deletes Daytona sandboxes (they cost money). Other providers
- * (local, etc.) are left intact.
+ * Uses provider-aware cleanup, but keeps best-effort semantics so agent
+ * completion is not blocked on sandbox teardown failures.
  */
 
 import { createMiddleware } from "langchain";
-import { deleteSandboxBackend } from "../utils/sandboxState.js";
-import { setSandboxMetadata } from "../utils/sandboxState.js";
+import { cleanupSandboxForThread } from "../utils/sandboxLifecycle.js";
 
 export const cleanupSandboxMiddleware = createMiddleware({
   name: "CleanupSandbox",
@@ -20,22 +19,13 @@ export const cleanupSandboxMiddleware = createMiddleware({
     const sandboxId = configurable?.sandbox_id as string | undefined;
 
     if (!threadId) return {};
-
-    const sandboxType = process.env.SANDBOX_TYPE ?? "local";
-    if (sandboxType !== "daytona") return {};
-
-    // Remove from in-process cache
-    deleteSandboxBackend(threadId);
-
-    // Clear persisted sandbox ID from thread metadata
-    if (sandboxId) {
-      try {
-        await setSandboxMetadata(threadId, { sandboxId: "" });
-        const { deleteDaytonaSandbox } = await import("../integrations/daytona.js");
-        await deleteDaytonaSandbox(sandboxId);
-      } catch (err) {
-        console.error(`[cleanupSandbox] Failed to delete Daytona sandbox ${sandboxId}:`, err);
-      }
+    try {
+      await cleanupSandboxForThread(threadId, sandboxId);
+    } catch (err) {
+      console.error(
+        `[cleanupSandbox] Failed to clean up sandbox for thread ${threadId}:`,
+        err,
+      );
     }
 
     return {};

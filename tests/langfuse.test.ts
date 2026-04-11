@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "bun:test";
+import { isLangfuseConfigured } from "../src/integrations/langfuse.js";
 import { agentFooter } from "../src/utils/comments.js";
 import { getTraceUrl } from "../src/utils/tracing.js";
-import { isLangfuseConfigured } from "../src/integrations/langfuse.js";
 
 describe("isLangfuseConfigured", () => {
   let origPublic: string | undefined;

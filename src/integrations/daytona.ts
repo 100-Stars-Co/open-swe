@@ -383,9 +383,10 @@ export async function deleteDaytonaSandbox(sandboxId: string): Promise<void> {
   try {
     const sdk = await import("@daytona/sdk" as never);
     Daytona = sdk.Daytona;
-  } catch {
-    console.error("[@daytona/sdk] not installed, cannot delete sandbox");
-    return;
+  } catch (err) {
+    throw new Error(
+      `[@daytona/sdk] not installed, cannot delete sandbox ${sandboxId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 
   try {
@@ -402,6 +403,8 @@ export async function deleteDaytonaSandbox(sandboxId: string): Promise<void> {
     const sandbox = await daytona.get(sandboxId);
     await daytona.delete(sandbox);
   } catch (err) {
-    console.error(`[daytona-sandbox] Failed to delete sandbox ${sandboxId}:`, err);
+    throw new Error(
+      `[daytona-sandbox] Failed to delete sandbox ${sandboxId}: ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
